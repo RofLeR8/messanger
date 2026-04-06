@@ -18,6 +18,7 @@ RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --no-root
 
 # Copy application code
+COPY alembic.ini ./
 COPY src/ ./src/
 COPY frontend/ ./frontend/
 
