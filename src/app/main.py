@@ -1,15 +1,13 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
-from fastapi.exceptions import HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.users.router import router as user_router
 from app.chat.router import router as chat_router
 from app.users.users_router import router as users_router
 from app.uploads.router import router as uploads_router
 from app.notifications.router import router as notifications_router
-from app.users.exceptions import TokenExpiredException, TokenNotFoundException
 from app.websocket.manager import manager
 import os
 

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from app.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.users.crud import get_all_users, get_one_by_id_or_none, set_user_online, get_users_online_status
+from app.users.crud import get_all_users, get_one_by_id_or_none
 from app.users.dependensies import get_current_user
 from app.users.models import User
 from app.websocket.manager import manager

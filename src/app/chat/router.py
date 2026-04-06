@@ -1,9 +1,9 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, Depends, HTTPException, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 import asyncio
 from app.users.dependensies import get_current_user
-from app.users.crud import get_all_users, get_one_by_id_or_none, set_user_online, get_users_online_status
+from app.users.crud import get_one_by_id_or_none, set_user_online
 from app.users.models import User
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.chat.crud import (
     get_all_user_chats,
@@ -25,22 +25,15 @@ from app.chat.crud import (
     is_chat_member,
     get_chat_members,
     add_member_to_chat,
-    remove_member_from_chat,
     leave_group_chat,
     kick_member,
     update_chat_name,
     get_member_role,
-    get_chat_members_count,
 )
 from app.chat.schemas import (
     SMessageCreate,
-    SMessageRead,
-    WSMessage,
-    WSMessageResponse,
     SChatCreate,
     SChatRead,
-    WSTypingIndicator,
-    WSReadReceipt,
     SMessageEdit,
     SGroupChatCreate,
     SChatMemberRead,
@@ -50,7 +43,6 @@ from app.chat.schemas import (
 )
 from app.chat.models import MemberRole
 from app.websocket.manager import manager
-from app.users.crud import get_one_by_id_or_none
 from jose import jwt
 from datetime import datetime, timezone
 from app.config import get_auth_data
@@ -902,7 +894,7 @@ async def websocket_chat_connection(
             await set_user_online(db, current_user_id, False)
             await manager.broadcast_user_status(current_user_id, False)
         raise
-    except Exception as e:
+    except Exception:
         manager.disconnect(websocket, current_user_id, chat_id)
         if not manager.active_connections.get(current_user_id) and current_user_id not in manager.notification_connections:
             await set_user_online(db, current_user_id, False)

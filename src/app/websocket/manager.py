@@ -1,5 +1,5 @@
 from fastapi import WebSocket
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Set
 from collections import defaultdict
 
 

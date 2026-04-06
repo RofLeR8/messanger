@@ -22,7 +22,7 @@ async def register_user(user_data: SUserRegister, db: AsyncSession = Depends(get
     if user_data.password != user_data.password_check:
         raise PasswordMismatchException("password doesn`t match")
     
-    hashed_password = get_password_hash(user_data.password)
+    get_password_hash(user_data.password)
     
     await create_user(db,user_data)
     return {"message": "Successful registration"}

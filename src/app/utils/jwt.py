@@ -1,7 +1,5 @@
 from passlib.context import CryptContext
-from pydantic import EmailStr
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-from sqlalchemy.ext.asyncio import AsyncSession
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)

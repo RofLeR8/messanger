@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, or_, select, func, delete
+from sqlalchemy import and_, select, func
 from app.chat.models import Message, Chat, ChatMember, MemberRole
 from typing import List, Optional
 from datetime import datetime
@@ -97,7 +97,7 @@ async def get_all_user_chats(db: AsyncSession, user_id: int):
         last_message_q = (
             select(Message)
             .where(Message.chat_id == chat.id)
-            .where(Message.is_deleted == False)
+            .where(not Message.is_deleted)
             .order_by(Message.created_at.desc())
             .limit(1)
         )
@@ -109,8 +109,8 @@ async def get_all_user_chats(db: AsyncSession, user_id: int):
             select(func.count(Message.id))
             .where(Message.chat_id == chat.id)
             .where(Message.sender_id != user_id)
-            .where(Message.is_read == False)
-            .where(Message.is_deleted == False)
+            .where(not Message.is_read)
+            .where(not Message.is_deleted)
         )
         unread_result = await db.execute(unread_q)
         unread_count = unread_result.scalar() or 0
@@ -148,7 +148,7 @@ async def get_chat_by_id_with_details(db: AsyncSession, chat_id: int, user_id: i
     last_message_q = (
         select(Message)
         .where(Message.chat_id == chat_id)
-        .where(Message.is_deleted == False)
+        .where(not Message.is_deleted)
         .order_by(Message.created_at.desc())
         .limit(1)
     )
@@ -160,8 +160,8 @@ async def get_chat_by_id_with_details(db: AsyncSession, chat_id: int, user_id: i
         select(func.count(Message.id))
         .where(Message.chat_id == chat_id)
         .where(Message.sender_id != user_id)
-        .where(Message.is_read == False)
-        .where(Message.is_deleted == False)
+        .where(not Message.is_read)
+        .where(not Message.is_deleted)
     )
     result = await db.execute(unread_q)
     unread_count = result.scalar() or 0
@@ -264,7 +264,7 @@ async def get_messages_from_chat(db: AsyncSession, chat_id: int, limit: int = 50
     q = (
         select(Message)
         .where(Message.chat_id == chat_id)
-        .where(Message.is_deleted == False)
+        .where(not Message.is_deleted)
         .order_by(Message.created_at.desc())
         .offset(offset)
         .limit(limit)
@@ -428,8 +428,8 @@ async def mark_messages_as_read(db: AsyncSession, chat_id: int, user_id: int) ->
         select(Message)
         .where(Message.chat_id == chat_id)
         .where(Message.sender_id != user_id)
-        .where(Message.is_read == False)
-        .where(Message.is_deleted == False)
+        .where(not Message.is_read)
+        .where(not Message.is_deleted)
     )
     result = await db.execute(q)
     messages = result.scalars().all()
@@ -523,8 +523,8 @@ async def get_pinned_messages(db: AsyncSession, chat_id: int) -> List[Message]:
     q = (
         select(Message)
         .where(Message.chat_id == chat_id)
-        .where(Message.is_pinned == True)
-        .where(Message.is_deleted == False)
+        .where(Message.is_pinned)
+        .where(not Message.is_deleted)
         .order_by(Message.pinned_at.desc())
     )
     result = await db.execute(q)
@@ -544,7 +544,7 @@ async def search_messages(
         select(Message)
         .where(Message.chat_id == chat_id)
         .where(Message.content.ilike(search_query))
-        .where(Message.is_deleted == False)
+        .where(not Message.is_deleted)
         .order_by(Message.created_at.desc())
         .offset(offset)
         .limit(limit)

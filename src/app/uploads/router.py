@@ -3,7 +3,6 @@ from app.users.dependensies import get_current_user
 from app.users.models import User
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-import os
 import uuid
 from datetime import datetime
 from pathlib import Path
