@@ -10,10 +10,8 @@ node_modules/
 *.md
 .dockerignore
 docker-compose.yml
-Dockerfile
 .github/
 tests/
-poetry.lock
 .pytest_cache/
 .coverage
 *.egg-info/
