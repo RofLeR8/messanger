@@ -65,7 +65,7 @@ jobs:
 
       - name: Deploy
         run: |
-          cd ~/back_messanger
+          cd ~/messanger
           git pull origin main
           docker compose up -d --build --remove-orphans
           docker image prune -f
