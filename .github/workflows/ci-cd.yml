@@ -66,6 +66,19 @@ jobs:
       - name: Deploy
         run: |
           cd ~/messanger
+
+          # Generate .env from secrets
+          cat > src/.env << EOF
+          SECRET_KEY=${{ secrets.APP_SECRET_KEY }}
+          ALGORITHM=HS256
+          POSTGRES_USER=${{ secrets.DB_USER }}
+          POSTGRES_PASSWORD=${{ secrets.DB_PASSWORD }}
+          POSTGRES_DB=${{ secrets.DB_NAME }}
+          POSTGRES_HOST=db
+          POSTGRES_PORT=5432
+          DATABASE_URL=postgresql+asyncpg://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@db:5432/${{ secrets.DB_NAME }}
+          EOF
+
           git pull origin main
           docker compose up -d --build --remove-orphans
           docker image prune -f

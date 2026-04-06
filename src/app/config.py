@@ -1,11 +1,19 @@
-import os 
+import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+def get_env_or_default(key, default=None):
+    """Read env var, fallback to .env file if available."""
+    value = os.environ.get(key)
+    if value is not None:
+        return value
+    return default
 
 class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str
     model_config = SettingsConfigDict(
-        env_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",".env")
+        env_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"),
+        extra="allow"
     )
 
 settings = Settings()
