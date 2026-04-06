@@ -3,7 +3,6 @@ from fastapi.responses import RedirectResponse
 from jose import jwt, JWTError
 from datetime import datetime, timezone
 from app.config import get_auth_data
-from app.users.exceptions import *
 from app.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.users.crud import get_one_by_id_or_none

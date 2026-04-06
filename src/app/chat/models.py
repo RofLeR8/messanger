@@ -2,8 +2,11 @@ from sqlalchemy import Integer, String, ForeignKey, Text, Boolean, DateTime, Enu
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 import enum
+
+if TYPE_CHECKING:
+    from app.users.models import User
 
 
 class MemberRole(str, enum.Enum):
