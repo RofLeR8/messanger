@@ -57,20 +57,16 @@ jobs:
 
   deploy:
     needs: lint-and-test
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
 
     steps:
-      - name: Deploy to server via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          script: |
-            cd ~/back_messanger
-            git pull origin main
-            docker compose up -d --build --remove-orphans
-            docker image prune -f
-            echo "Deploy completed at $(date)"
+      - uses: actions/checkout@v4
+
+      - name: Deploy
+        run: |
+          cd ~/back_messanger
+          git pull origin main
+          docker compose up -d --build --remove-orphans
+          docker image prune -f
+          echo "Deploy completed at $(date)"
