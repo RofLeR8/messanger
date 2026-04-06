@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Messenger</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Auth Section -->
+        <div id="auth-section" class="auth-container">
+            <div class="auth-box">
+                <h1 class="auth-title">Roflochatik</h1>
+
+                <!-- Login Form -->
+                <form id="login-form" class="auth-form">
+                    <h2>Login</h2>
+                    <div class="form-group">
+                        <label for="login-email">Email</label>
+                        <input type="email" id="login-email" required placeholder="Enter your email">
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password">Password</label>
+                        <input type="password" id="login-password" required placeholder="Enter your password">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Login</button>
+                    <p class="auth-switch">Don't have an account? <a href="#" id="show-register">Register</a></p>
+                </form>
+
+                <!-- Register Form -->
+                <form id="register-form" class="auth-form hidden">
+                    <h2>Register</h2>
+                    <div class="form-group">
+                        <label for="register-email">Email</label>
+                        <input type="email" id="register-email" required placeholder="Enter your email">
+                    </div>
+                    <div class="form-group">
+                        <label for="register-password">Password</label>
+                        <input type="password" id="register-password" required placeholder="Enter your password">
+                    </div>
+                    <div class="form-group">
+                        <label for="register-password-check">Confirm Password</label>
+                        <input type="password" id="register-password-check" required placeholder="Confirm your password">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Register</button>
+                    <p class="auth-switch">Already have an account? <a href="#" id="show-login">Login</a></p>
+                </form>
+
+                <div id="auth-error" class="error-message hidden"></div>
+            </div>
+        </div>
+
+        <!-- Main Chat Section -->
+        <div id="chat-section" class="chat-section hidden">
+            <!-- Chats List Page -->
+            <div id="chats-page" class="page chats-page active">
+                <div class="page-header">
+                    <h1 class="page-title">Chats</h1>
+                    <button id="logout-btn" class="btn btn-icon" title="Logout">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                            <polyline points="16 17 21 12 16 7"></polyline>
+                            <line x1="21" y1="12" x2="9" y2="12"></line>
+                        </svg>
+                    </button>
+                </div>
+                
+                <div class="new-chat-section">
+                    <div class="new-chat-buttons">
+                        <button id="create-direct-chat-btn" class="btn btn-primary btn-new-chat">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                            Direct Chat
+                        </button>
+                        <button id="create-group-chat-btn" class="btn btn-secondary btn-new-chat">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="9" cy="7" r="4"></circle>
+                                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                            </svg>
+                            Group Chat
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="chats-list" class="chats-list">
+                    <!-- Chat items will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Chat Detail Page -->
+            <div id="chat-page" class="page chat-page">
+                <div class="page-header chat-page-header">
+                    <button id="back-to-chats-btn" class="btn btn-icon back-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="15 18 9 12 15 6"></polyline>
+                        </svg>
+                    </button>
+                    <div class="chat-title-container">
+                        <h1 id="chat-title" class="page-title">Chat</h1>
+                        <span id="chat-header-status" class="chat-header-status"></span>
+                    </div>
+                    <button id="toggle-pinned-btn" class="btn btn-icon" title="Pinned messages">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="17" x2="12" y2="22"></line>
+                            <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
+                        </svg>
+                    </button>
+                    <button id="toggle-search-btn" class="btn btn-icon" title="Search messages">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                    </button>
+                </div>
+                
+                <!-- Search Bar -->
+                <div id="search-bar" class="search-bar hidden">
+                    <input type="text" id="search-input" placeholder="Search messages..." class="search-input">
+                    <span id="search-results-info" class="search-results-info"></span>
+                    <button id="close-search-btn" class="btn btn-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+                
+                <!-- Pinned Messages Panel -->
+                <div id="pinned-panel" class="pinned-panel hidden">
+                    <div class="pinned-panel-header">
+                        <h3>Pinned Messages</h3>
+                        <button id="close-pinned-btn" class="btn btn-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="pinned-messages-list" class="pinned-messages-list"></div>
+                </div>
+                
+                <div id="messages-container" class="messages-container">
+                    <!-- Messages will be loaded here -->
+                </div>
+                
+                <div class="message-input-area">
+                    <div class="message-input-wrapper">
+                        <div id="reply-preview" class="reply-preview hidden">
+                            <span class="reply-preview-text">Replying to <strong></strong></span>
+                            <button id="cancel-reply-btn" class="btn btn-icon btn-tiny" title="Cancel reply">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                        </div>
+                        <div id="file-preview" class="file-preview hidden">
+                            <span class="file-preview-name"></span>
+                            <button id="cancel-file-btn" class="btn btn-icon btn-tiny" title="Remove file">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="input-row">
+                            <input type="file" id="file-input" class="hidden-input" accept="image/*,application/pdf,.txt,.zip">
+                            <button id="attach-file-btn" class="btn btn-icon btn-attach" type="button" title="Attach file">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                                </svg>
+                            </button>
+                            <input type="text" id="message-input" placeholder="Type a message..." class="message-input">
+                        </div>
+                    </div>
+                    <button id="send-message-btn" class="btn btn-primary btn-send" type="button">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Context Menu - outside app-container for fixed positioning -->
+        <div id="context-menu" class="context-menu hidden">
+            <button class="context-menu-item" data-action="reply">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 14 4 9 9 4"></polyline>
+                    <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
+                </svg>
+                Reply
+            </button>
+            <button class="context-menu-item" data-action="edit">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
+                Edit
+            </button>
+            <button class="context-menu-item" data-action="pin">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="17" x2="12" y2="22"></line>
+                    <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
+                </svg>
+                <span class="pin-text">Pin</span>
+            </button>
+            <button class="context-menu-item" data-action="delete">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+                Delete
+            </button>
+        </div>
+
+        <!-- Direct Chat Modal -->
+        <div id="direct-chat-modal" class="modal-overlay hidden">
+            <div class="modal-box">
+                <div class="modal-header">
+                    <h2>Create Direct Chat</h2>
+                    <button id="close-direct-modal-btn" class="btn btn-icon btn-tiny">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+                <form id="direct-chat-form">
+                    <div class="form-group">
+                        <label for="direct-chat-email">User email</label>
+                        <input type="email" id="direct-chat-email" required placeholder="Enter user email">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Create Chat</button>
+                </form>
+                <div id="direct-chat-error" class="error-message hidden"></div>
+            </div>
+        </div>
+
+        <!-- Group Chat Modal -->
+        <div id="group-chat-modal" class="modal-overlay hidden">
+            <div class="modal-box">
+                <div class="modal-header">
+                    <h2>Create Group Chat</h2>
+                    <button id="close-group-modal-btn" class="btn btn-icon btn-tiny">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+                <form id="group-chat-form">
+                    <div class="form-group">
+                        <label for="group-chat-name">Group name</label>
+                        <input type="text" id="group-chat-name" required placeholder="Enter group name" minlength="1" maxlength="255">
+                    </div>
+                    <div class="form-group">
+                        <label>Select members</label>
+                        <div id="group-members-select" class="member-select-container">
+                            <!-- Checkboxes will be rendered here -->
+                        </div>
+                        <div id="group-members-error" class="error-message hidden"></div>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Create Group</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Group Members Panel (slide-out) -->
+        <div id="group-members-panel" class="group-members-panel hidden">
+            <div class="group-members-header">
+                <h3>Members</h3>
+                <button id="close-members-panel-btn" class="btn btn-icon btn-tiny">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div id="group-members-list" class="group-members-list">
+                <!-- Members will be rendered here -->
+            </div>
+            <div id="group-add-member-section" class="group-add-member-section hidden">
+                <div class="input-with-button">
+                    <input type="email" id="add-member-email" placeholder="User email to add" class="input-field input-small">
+                    <button id="add-member-btn" class="btn btn-primary btn-icon-only btn-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div id="leave-group-section" class="leave-group-section hidden">
+                <button id="leave-group-btn" class="btn btn-danger btn-full">Leave Group</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>
