@@ -29,6 +29,11 @@ frontend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "frontend")
 app.mount('/static', StaticFiles(directory=os.path.join(frontend_dir, 'static')), name='static')
 app.mount('/js', StaticFiles(directory=os.path.join(frontend_dir, 'js')), name='js')
 
+# Mount uploads directory for serving files (MUST be before API routes)
+# Uses /uploads/files/ to avoid conflict with /uploads/file POST endpoint
+uploads_dir = os.path.join(os.path.dirname(__file__), "uploads", "uploads")
+app.mount('/uploads/files', StaticFiles(directory=uploads_dir, html=True), name='uploads-files')
+
 @app.get("/")
 async def root():
     return FileResponse(os.path.join(frontend_dir, "index.html"))
@@ -46,8 +51,4 @@ app.include_router(users_router)
 app.include_router(chat_router)
 app.include_router(uploads_router)
 app.include_router(notifications_router)
-
-# Mount uploads directory for serving files (must be after API routes)
-uploads_dir = os.path.join(os.path.dirname(__file__), "uploads", "uploads")
-app.mount('/uploads', StaticFiles(directory=uploads_dir, html=True), name='uploads-files')
 

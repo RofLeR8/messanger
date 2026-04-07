@@ -20,6 +20,8 @@ RUN poetry config virtualenvs.create false \
 # Copy application code
 COPY alembic.ini ./
 COPY src/ ./src/
+# .env is in .dockerignore, copy it explicitly
+COPY src/.env ./src/.env
 COPY frontend/ ./frontend/
 
 # Copy and make entrypoint executable

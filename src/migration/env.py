@@ -1,4 +1,4 @@
-import sys 
+import sys
 from os.path import dirname, abspath
 sys.path.insert(0, dirname(dirname(abspath(__file__))))
 import asyncio
@@ -10,6 +10,10 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from app.database import Base, database_url
+
+# Import all models so they register with Base.metadata
+from app.users.models import User, Friendship  # noqa: F401
+from app.chat.models import Chat, ChatMember, Message  # noqa: F401
 
 
 # this is the Alembic Config object, which provides

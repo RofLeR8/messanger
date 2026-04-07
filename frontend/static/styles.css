@@ -32,6 +32,9 @@ body {
     background: var(--bg-primary);
     color: var(--text-primary);
     min-height: 100vh;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: manipulation;
 }
 
 .hidden {
@@ -48,7 +51,17 @@ body {
 /* App Container */
 .app-container {
     width: 100%;
-    height: 100vh;
+    height: 100dvh; /* Dynamic viewport height */
+    height: 100svh;
+    /* Safe area insets for notched devices */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 /* Auth Section */
@@ -206,18 +219,19 @@ body {
 /* Chat Section */
 .chat-section {
     width: 100%;
-    height: 100vh;
+    height: 100%;
     position: relative;
     overflow: hidden;
+    flex: 1;
 }
 
 /* Pages */
 .page {
     position: absolute;
-    top: 0;
+    top: 52px;
     left: 0;
     width: 100%;
-    height: 100%;
+    height: calc(100% - 52px);
     display: flex;
     flex-direction: column;
     background: var(--bg-primary);
@@ -437,17 +451,40 @@ body {
 
 .chat-title-container {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
     flex: 1;
+}
+
+.chat-header-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.chat-header-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
 }
 
 /* Search Bar */
 .search-bar {
     background: var(--bg-secondary);
-    padding: 16px 24px;
+    padding: 12px 16px;
     display: flex;
-    gap: 12px;
+    gap: 8px;
     align-items: center;
     border-bottom: 1px solid var(--border-color);
     animation: slideDown 0.3s ease;
@@ -455,13 +492,41 @@ body {
 
 .search-input {
     flex: 1;
-    padding: 12px 18px;
+    min-width: 0;
+    padding: 10px 14px;
     border: 2px solid var(--border-color);
     border-radius: 12px;
     background: var(--bg-primary);
     color: var(--text-primary);
     font-size: 0.95rem;
     transition: all var(--transition-fast);
+}
+
+.search-nav-buttons {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.search-nav-buttons .btn-tiny {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    transition: all var(--transition-fast);
+}
+
+.search-nav-buttons .btn-tiny:hover {
+    border-color: var(--accent-primary);
+    background: var(--accent-primary);
+    color: white;
 }
 
 .search-input:focus {
@@ -1118,6 +1183,27 @@ body {
 
 /* Mobile Responsive */
 @media (max-width: 768px) {
+    /* Prevent iOS Safari zoom on input focus - font must be >= 16px */
+    .message-input,
+    .search-input,
+    .form-group input,
+    .search-user-field,
+    .textarea-field,
+    .input-with-button .input-field {
+        font-size: 16px !important;
+    }
+
+    /* Larger touch targets for search navigation on mobile */
+    .search-bar {
+        padding: 10px 12px;
+        gap: 6px;
+    }
+
+    .search-nav-buttons .btn-tiny {
+        width: 40px;
+        height: 40px;
+    }
+
     .auth-box {
         padding: 30px 25px;
     }
@@ -1140,7 +1226,6 @@ body {
 
     .input-with-button .input-field {
         padding: 12px 16px;
-        font-size: 0.9rem;
     }
 
     .btn-icon-only {
@@ -1309,7 +1394,7 @@ body {
     margin-top: 8px;
 }
 
-/* ==================== Member Select ==================== */
+/* ==================== Member Select (Group Chat Modal) ==================== */
 .member-select-container {
     max-height: 250px;
     overflow-y: auto;
@@ -1320,35 +1405,114 @@ body {
 }
 
 .member-checkbox {
-    display: flex;
-    align-items: center;
-    padding: 10px 12px;
+    padding: 4px 8px;
     border-radius: 8px;
     transition: background var(--transition-fast);
-    cursor: pointer;
 }
 
 .member-checkbox:hover {
     background: var(--bg-tertiary);
 }
 
-.member-checkbox input[type="checkbox"] {
-    margin-right: 12px;
-    width: 18px;
-    height: 18px;
-    accent-color: var(--accent-primary);
+/* Custom checkbox */
+.member-checkbox label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
     cursor: pointer;
 }
 
-.member-checkbox .member-name {
-    font-size: 0.95rem;
-    color: var(--text-primary);
-    flex: 1;
+.member-checkbox input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    min-height: 22px;
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+    position: relative;
+    transition: all var(--transition-fast);
+    margin: 0;
 }
 
-.member-checkbox .member-email {
-    font-size: 0.8rem;
+.member-checkbox input[type="checkbox"]:hover {
+    border-color: var(--accent-primary);
+}
+
+.member-checkbox input[type="checkbox"]:checked {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    animation: checkPop 0.3s ease;
+}
+
+.member-checkbox input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 5px;
+    height: 9px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: translate(-50%, -60%) rotate(45deg);
+}
+
+@keyframes checkPop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+}
+
+.member-avatar-small {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.member-avatar-small img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.member-info-row {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.member-checkbox .member-name {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.member-checkbox .member-username {
+    font-size: 0.75rem;
     color: var(--text-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 /* ==================== Group Members Panel ==================== */
@@ -1413,6 +1577,13 @@ body {
     font-weight: 700;
     color: white;
     flex-shrink: 0;
+    overflow: hidden;
+}
+
+.group-member-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .group-member-info {
@@ -1522,4 +1693,701 @@ body {
 
 .message.sent .message-sender-name {
     text-align: right;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.message-sender-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.message-sender-row-sent {
+    flex-direction: row-reverse;
+}
+
+.message .message-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.message .message-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+/* ==================== Main Tabs (Chats/Friends) ==================== */
+.main-tabs {
+    display: flex;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    padding: 0;
+    z-index: 10;
+    position: relative;
+    flex-shrink: 0;
+    height: 52px;
+}
+
+.main-tab-btn {
+    flex: 1;
+    padding: 14px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.main-tab-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.main-tab-btn.active {
+    color: var(--accent-primary);
+    border-bottom-color: var(--accent-primary);
+    background: var(--bg-primary);
+}
+
+/* ==================== Friends Page ==================== */
+.friends-page {
+    background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.friends-tabs {
+    display: flex;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    padding: 0 16px;
+}
+
+.friends-tab-btn {
+    flex: 1;
+    padding: 12px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.friends-tab-btn:hover {
+    color: var(--text-primary);
+}
+
+.friends-tab-btn.active {
+    color: var(--accent-primary);
+    border-bottom-color: var(--accent-primary);
+}
+
+.friends-panel {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.friends-panel.active {
+    display: flex;
+    flex-direction: column;
+}
+
+/* ==================== Friends List ==================== */
+.friends-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.friend-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: var(--bg-card);
+    transition: all var(--transition-normal);
+    animation: slideIn 0.3s ease backwards;
+}
+
+.friend-item:hover {
+    background: var(--bg-tertiary);
+    transform: translateX(6px);
+    box-shadow: var(--shadow-md);
+}
+
+.friend-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+    overflow: hidden;
+    position: relative;
+}
+
+.friend-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+.friend-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.friend-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.friend-username {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.friend-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.btn-chat {
+    padding: 8px 14px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border: none;
+    background: var(--accent-gradient);
+    color: white;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-chat:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-remove-friend {
+    padding: 8px;
+    border-radius: 10px;
+    border: none;
+    background: transparent;
+    color: var(--error);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-remove-friend:hover {
+    background: rgba(244, 67, 54, 0.1);
+}
+
+/* ==================== Pending Requests ==================== */
+.requests-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.requests-section-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.pending-requests-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.pending-request-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: var(--bg-card);
+    border-left: 3px solid var(--accent-primary);
+    animation: slideIn 0.3s ease backwards;
+}
+
+.pending-request-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.pending-request-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.pending-request-username {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.pending-request-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.btn-accept {
+    padding: 8px 14px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border: none;
+    background: var(--success);
+    color: white;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.btn-accept:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-decline {
+    padding: 8px 14px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border: 2px solid var(--error);
+    background: transparent;
+    color: var(--error);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.btn-decline:hover {
+    background: rgba(244, 67, 54, 0.1);
+}
+
+/* ==================== Search User ==================== */
+.search-friends-section {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.search-user-input {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.search-user-field {
+    flex: 1;
+    padding: 14px 18px;
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    transition: all var(--transition-fast);
+}
+
+.search-user-field:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.15);
+}
+
+.search-user-results {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.search-user-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: var(--bg-card);
+    animation: slideIn 0.3s ease backwards;
+}
+
+.search-user-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.search-user-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.search-user-handle {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.btn-add-friend {
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border: none;
+    background: var(--accent-gradient);
+    color: white;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.btn-add-friend:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-add-friend:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* ==================== Friend Select (in modals) ==================== */
+.friend-select-container {
+    max-height: 250px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-primary);
+    padding: 8px;
+}
+
+.friend-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    transition: background var(--transition-fast);
+    cursor: pointer;
+}
+
+.friend-checkbox:hover {
+    background: var(--bg-tertiary);
+}
+
+.friend-checkbox input[type="checkbox"] {
+    margin-right: 4px;
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+.friend-checkbox .friend-avatar-select {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.friend-checkbox .friend-avatar-select img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+.friend-checkbox .friend-name-select {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    flex: 1;
+}
+
+.friend-checkbox .friend-username-select {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* ==================== Info Message ==================== */
+.info-message {
+    background: rgba(233, 69, 96, 0.1);
+    color: var(--text-secondary);
+    padding: 14px 16px;
+    border-radius: 12px;
+    margin-top: 16px;
+    border: 1px solid var(--border-color);
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.info-message p {
+    margin: 0;
+}
+
+/* ==================== Avatar in Chat Items ==================== */
+.chat-item-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+    overflow: hidden;
+    position: relative;
+}
+
+.chat-item-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+.chat-item-avatar .avatar-status-dot {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid var(--bg-card);
+}
+
+.chat-item-avatar .avatar-status-dot.online {
+    background: var(--success);
+}
+
+.chat-item-content-with-avatar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+}
+
+/* ==================== Avatar in Messages ==================== */
+.message-with-avatar {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+
+.message-with-avatar.sent {
+    flex-direction: row-reverse;
+}
+
+.message-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.message-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+/* ==================== Empty State ==================== */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    text-align: center;
+}
+
+.empty-state-icon {
+    font-size: 3rem;
+    margin-bottom: 16px;
+    opacity: 0.3;
+}
+
+.empty-state p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+
+/* ==================== Profile Modal ==================== */
+.profile-modal-box {
+    max-width: 480px;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.profile-avatar-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 24px;
+    position: relative;
+}
+
+.profile-avatar-large {
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: white;
+    overflow: hidden;
+    position: relative;
+}
+
+.profile-avatar-large img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+.avatar-upload-overlay {
+    position: relative;
+    margin-top: -24px;
+    margin-left: 40px;
+}
+
+.avatar-upload-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    color: white;
+    cursor: pointer;
+    border: 3px solid var(--bg-secondary);
+    transition: all var(--transition-fast);
+}
+
+.avatar-upload-btn:hover {
+    background: var(--accent-hover);
+    transform: scale(1.1);
+}
+
+.input-readonly {
+    width: 100%;
+    padding: 14px 16px;
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.textarea-field {
+    width: 100%;
+    padding: 14px 16px;
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 80px;
+    transition: all var(--transition-fast);
+}
+
+.textarea-field:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.15);
+}
+
+.success-message {
+    background: rgba(76, 175, 80, 0.1);
+    color: var(--success);
+    padding: 14px 16px;
+    border-radius: 12px;
+    margin-top: 16px;
+    border: 1px solid var(--success);
+    font-size: 0.9rem;
+    text-align: center;
+    animation: fadeIn 0.3s ease;
 }

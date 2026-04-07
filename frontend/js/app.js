@@ -7,10 +7,14 @@ let currentChatId = null;
 let currentUserId = null;
 let websocket = null;
 let notificationWs = null;
-let usersCache = {}; // Cache for user info: { userId: { name, email, is_online, last_seen } }
+let usersCache = {}; // Cache for user info: { userId: { name, email, username, avatar_url, is_online, last_seen } }
+let friendsCache = []; // Cache for current user's friends
+let pendingRequestsCache = []; // Cache for pending friend requests
 let typingTimeout = null;
 let isTyping = false;
 let currentChatIsGroup = false; // Track if current chat is a group
+let currentActiveTab = 'chats'; // 'chats' or 'friends'
+let currentFriendsTab = 'all'; // 'all', 'requests', 'search'
 
 // Reply state
 let replyingToMessage = null; // { id, sender_id, content, sender_name }
@@ -38,6 +42,19 @@ let currentChatMembers = []; // Cached members of current chat
 // DOM Elements
 const authSection = document.getElementById('auth-section');
 const chatSection = document.getElementById('chat-section');
+const mainTabs = document.getElementById('main-tabs');
+const tabChats = document.getElementById('tab-chats');
+const tabFriends = document.getElementById('tab-friends');
+const friendsPage = document.getElementById('friends-page');
+const friendsTabs = document.getElementById('friends-tabs');
+const friendsTabAll = document.getElementById('friends-tab-all');
+const friendsTabRequests = document.getElementById('friends-tab-requests');
+const friendsTabSearch = document.getElementById('friends-tab-search');
+const friendsList = document.getElementById('friends-list');
+const pendingRequestsList = document.getElementById('pending-requests-list');
+const searchUserInput = document.getElementById('search-user-input');
+const searchUserBtn = document.getElementById('search-user-btn');
+const searchUserResults = document.getElementById('search-user-results');
 const loginForm = document.getElementById('login-form');
 const registerForm = document.getElementById('register-form');
 const authError = document.getElementById('auth-error');
@@ -48,6 +65,7 @@ const chatsList = document.getElementById('chats-list');
 const createDirectChatBtn = document.getElementById('create-direct-chat-btn');
 const createGroupChatBtn = document.getElementById('create-group-chat-btn');
 const chatTitle = document.getElementById('chat-title');
+const chatHeaderAvatar = document.getElementById('chat-header-avatar');
 const chatHeaderStatus = document.getElementById('chat-header-status');
 const messagesContainer = document.getElementById('messages-container');
 const messageInput = document.getElementById('message-input');
@@ -58,6 +76,8 @@ const toggleSearchBtn = document.getElementById('toggle-search-btn');
 const searchBar = document.getElementById('search-bar');
 const searchInput = document.getElementById('search-input');
 const closeSearchBtn = document.getElementById('close-search-btn');
+const searchPrevBtn = document.getElementById('search-prev-btn');
+const searchNextBtn = document.getElementById('search-next-btn');
 const pinnedPanel = document.getElementById('pinned-panel');
 const pinnedMessagesList = document.getElementById('pinned-messages-list');
 const closePinnedBtn = document.getElementById('close-pinned-btn');
@@ -78,9 +98,24 @@ const chatPage = document.getElementById('chat-page');
 // Modals
 const directChatModal = document.getElementById('direct-chat-modal');
 const directChatForm = document.getElementById('direct-chat-form');
-const directChatEmailInput = document.getElementById('direct-chat-email');
+const directChatFriendsSelect = document.getElementById('direct-chat-friends-select');
+const directChatNoFriends = document.getElementById('direct-chat-no-friends');
 const directChatError = document.getElementById('direct-chat-error');
 const closeDirectModalBtn = document.getElementById('close-direct-modal-btn');
+
+const profileModal = document.getElementById('profile-modal');
+const profileBtn = document.getElementById('profile-btn');
+const closeProfileBtn = document.getElementById('close-profile-btn');
+const profileForm = document.getElementById('profile-form');
+const profileEmail = document.getElementById('profile-email');
+const profileName = document.getElementById('profile-name');
+const profileUsername = document.getElementById('profile-username');
+const profilePhone = document.getElementById('profile-phone');
+const profileBio = document.getElementById('profile-bio');
+const profileAvatarDisplay = document.getElementById('profile-avatar-display');
+const avatarUploadInput = document.getElementById('avatar-upload-input');
+const profileSuccess = document.getElementById('profile-success');
+const profileError = document.getElementById('profile-error');
 
 const groupChatModal = document.getElementById('group-chat-modal');
 const groupChatForm = document.getElementById('group-chat-form');
@@ -226,7 +261,7 @@ function scrollToMessage(messageId) {
 
 function getUserDisplayName(userId) {
     const user = usersCache[userId];
-    if (user) return user.name || user.email.split('@')[0];
+    if (user) return user.name || user.email?.split('@')[0] || `User ${userId}`;
     return `User ${userId}`;
 }
 
@@ -235,18 +270,41 @@ function getUserInitials(userId) {
     return name.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
 }
 
+function getUserAvatarHtml(userId, size = '42') {
+    const user = usersCache[userId] || {};
+    const initials = getUserInitials(userId);
+    if (user.avatar_url) {
+        return `<div class="chat-item-avatar"><img src="${escapeHtml(user.avatar_url)}" alt="Avatar">
+            <span class="avatar-status-dot ${user.is_online ? 'online' : ''}"></span></div>`;
+    }
+    return `<div class="chat-item-avatar">${initials}
+        <span class="avatar-status-dot ${user.is_online ? 'online' : ''}"></span></div>`;
+}
+
+function getFriendAvatarHtml(user, sizeClass = 'friend-avatar') {
+    if (user.avatar_url) {
+        return `<div class="${sizeClass}"><img src="${escapeHtml(user.avatar_url)}" alt="Avatar"></div>`;
+    }
+    const initials = (user.name || 'U').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+    return `<div class="${sizeClass}">${initials}</div>`;
+}
+
 // ==================== Page Navigation ====================
 function navigateToChats() {
-    chatsPage.classList.add('active');
-    chatsPage.classList.remove('inactive');
-    chatPage.classList.remove('active');
-    chatPage.classList.add('inactive');
+    switchToTab('chats');
     currentChatId = null;
     currentChatIsGroup = false;
     currentChatMembers = [];
 
+    // Disconnect chat WebSocket
     if (websocket) { websocket.close(); websocket = null; }
     hideElement(groupMembersPanel);
+
+    // Reset chat detail page
+    chatPage.classList.remove('active');
+    chatPage.classList.add('inactive');
+    chatsPage.classList.add('active');
+    chatsPage.classList.remove('inactive');
 }
 
 async function refreshChats() {
@@ -321,17 +379,21 @@ function navigateToChat(chatId, chatName, isGroup) {
     if (isGroup) {
         chatHeaderStatus.innerHTML = '';
         chatHeaderStatus.classList.remove('online');
+        if (chatHeaderAvatar) chatHeaderAvatar.classList.add('hidden');
     } else {
         // For direct chats, show loading then update with actual status
         chatHeaderStatus.innerHTML = '<span class="offline-dot"></span> Loading...';
+        if (chatHeaderAvatar) chatHeaderAvatar.classList.add('hidden');
         // Load the other user's status from chat members
         getChatMembers(chatId).then(members => {
             const otherMember = members.find(m => m.user_id !== currentUserId);
             if (otherMember) {
-                // Cache the user info
+                // Cache the user info with avatar
                 usersCache[otherMember.user_id] = {
                     name: otherMember.user_name || otherMember.user_email?.split('@')[0],
                     email: otherMember.user_email || '',
+                    username: otherMember.user_username || null,
+                    avatar_url: otherMember.user_avatar_url || null,
                     is_online: false,
                     last_seen: null
                 };
@@ -340,6 +402,7 @@ function navigateToChat(chatId, chatName, isGroup) {
             }
         }).catch(() => {
             chatHeaderStatus.innerHTML = '';
+            if (chatHeaderAvatar) chatHeaderAvatar.classList.add('hidden');
         });
     }
 
@@ -364,6 +427,253 @@ function navigateToChat(chatId, chatName, isGroup) {
 
 function stopNotificationCheck() {}
 
+// ==================== Tab Switching ====================
+function switchToTab(tab) {
+    currentActiveTab = tab;
+    tabChats.classList.toggle('active', tab === 'chats');
+    tabFriends.classList.toggle('active', tab === 'friends');
+    chatsPage.classList.toggle('active', tab === 'chats');
+    friendsPage.classList.toggle('active', tab === 'friends');
+    chatsPage.classList.toggle('inactive', tab !== 'chats');
+    friendsPage.classList.toggle('inactive', tab !== 'friends');
+
+    if (tab === 'friends') {
+        loadFriendsPage();
+    }
+}
+
+function switchFriendsTab(subTab) {
+    currentFriendsTab = subTab;
+    friendsTabAll.classList.toggle('active', subTab === 'all');
+    friendsTabRequests.classList.toggle('active', subTab === 'requests');
+    friendsTabSearch.classList.toggle('active', subTab === 'search');
+
+    document.getElementById('friends-panel-all').classList.toggle('active', subTab === 'all');
+    document.getElementById('friends-panel-requests').classList.toggle('active', subTab === 'requests');
+    document.getElementById('friends-panel-search').classList.toggle('active', subTab === 'search');
+
+    if (subTab === 'all') loadFriendsList();
+    else if (subTab === 'requests') loadPendingRequests();
+}
+
+async function loadFriendsPage() {
+    await Promise.all([loadFriendsList(), loadPendingRequests()]);
+}
+
+async function loadFriendsList() {
+    const friends = await getMyFriends();
+    friendsCache = friends;
+    renderFriendsList(friends);
+}
+
+function renderFriendsList(friends) {
+    friendsList.innerHTML = '';
+    if (friends.length === 0) {
+        friendsList.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">👥</div>
+                <p>No friends yet.<br>Use the "Add Friend" tab to find people!</p>
+            </div>
+        `;
+        return;
+    }
+
+    friends.forEach((friend, index) => {
+        // Cache the user
+        usersCache[friend.user_id] = {
+            name: friend.name,
+            email: '',
+            username: friend.username,
+            avatar_url: friend.avatar_url,
+            is_online: friend.is_online,
+            last_seen: friend.last_seen
+        };
+
+        const item = document.createElement('div');
+        item.className = 'friend-item';
+        item.style.animationDelay = `${index * 0.05}s`;
+
+        item.innerHTML = `
+            ${getFriendAvatarHtml(friend)}
+            <div class="friend-info">
+                <div class="friend-name">
+                    ${friend.is_online ? '<span class="status-dot online"></span>' : ''}
+                    ${escapeHtml(friend.name)}
+                </div>
+                ${friend.username ? `<div class="friend-username">@${escapeHtml(friend.username)}</div>` : ''}
+            </div>
+            <div class="friend-actions">
+                <button class="btn-chat" data-friend-id="${friend.user_id}" title="Start chat">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    Chat
+                </button>
+                <button class="btn-remove-friend" data-friend-id="${friend.user_id}" title="Remove friend">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+        `;
+
+        friendsList.appendChild(item);
+    });
+
+    // Chat button handlers
+    friendsList.querySelectorAll('.btn-chat').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const friendId = parseInt(btn.dataset.friendId);
+            try {
+                const chat = await createDirectChat(friendId);
+                await loadChats();
+                // Find the other user info
+                const otherInfo = usersCache[friendId] || { name: 'Chat' };
+                navigateToChat(chat.id, otherInfo.name, false);
+            } catch (error) { alert('Failed to create chat: ' + error.message); }
+        });
+    });
+
+    // Remove friend handlers
+    friendsList.querySelectorAll('.btn-remove-friend').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const friendId = parseInt(btn.dataset.friendId);
+            if (!confirm('Remove this friend?')) return;
+            try {
+                await removeFriend(friendId);
+                await loadFriendsList();
+            } catch (error) { alert('Failed to remove friend: ' + error.message); }
+        });
+    });
+}
+
+async function loadPendingRequests() {
+    const requests = await getPendingFriendRequests();
+    pendingRequestsCache = requests;
+    renderPendingRequests(requests);
+}
+
+function renderPendingRequests(requests) {
+    pendingRequestsList.innerHTML = '';
+    if (requests.length === 0) {
+        pendingRequestsList.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">📬</div>
+                <p>No pending friend requests.</p>
+            </div>
+        `;
+        return;
+    }
+
+    requests.forEach((req, index) => {
+        const item = document.createElement('div');
+        item.className = 'pending-request-item';
+        item.style.animationDelay = `${index * 0.05}s`;
+
+        const requester = {
+            name: req.requester_name,
+            username: req.requester_username,
+            avatar_url: req.requester_avatar
+        };
+
+        item.innerHTML = `
+            ${getFriendAvatarHtml(requester)}
+            <div class="pending-request-info">
+                <div class="pending-request-name">${escapeHtml(req.requester_name)}</div>
+                ${req.requester_username ? `<div class="pending-request-username">@${escapeHtml(req.requester_username)}</div>` : ''}
+            </div>
+            <div class="pending-request-actions">
+                <button class="btn-accept" data-requester-id="${req.requester_id}">Accept</button>
+                <button class="btn-decline" data-requester-id="${req.requester_id}">Decline</button>
+            </div>
+        `;
+
+        pendingRequestsList.appendChild(item);
+    });
+
+    // Accept handlers
+    pendingRequestsList.querySelectorAll('.btn-accept').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const requesterId = parseInt(btn.dataset.requesterId);
+            try {
+                await acceptFriendRequest(requesterId);
+                await Promise.all([loadFriendsList(), loadPendingRequests()]);
+            } catch (error) { alert('Failed to accept: ' + error.message); }
+        });
+    });
+
+    // Decline handlers
+    pendingRequestsList.querySelectorAll('.btn-decline').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const requesterId = parseInt(btn.dataset.requesterId);
+            try {
+                await declineFriendRequest(requesterId);
+                await loadPendingRequests();
+            } catch (error) { alert('Failed to decline: ' + error.message); }
+        });
+    });
+}
+
+async function searchUserAndRender() {
+    const username = searchUserInput.value.trim();
+    if (!username || username.length < 2) {
+        searchUserResults.innerHTML = '';
+        return;
+    }
+
+    const user = await searchUserByUsername(username);
+    searchUserResults.innerHTML = '';
+
+    if (!user) {
+        searchUserResults.innerHTML = `
+            <div class="empty-state">
+                <p>User not found.</p>
+            </div>
+        `;
+        return;
+    }
+
+    // Cache the user
+    usersCache[user.id] = {
+        name: user.name,
+        email: user.email,
+        username: user.username,
+        avatar_url: user.avatar_url,
+        is_online: user.is_online,
+        last_seen: user.last_seen
+    };
+
+    // Check if already friends or request sent
+    const isFriend = friendsCache.some(f => f.user_id === user.id);
+    const requestSent = pendingRequestsCache.some(r => r.addressee_id === user.id);
+
+    const item = document.createElement('div');
+    item.className = 'search-user-item';
+
+    item.innerHTML = `
+        ${getFriendAvatarHtml(user)}
+        <div class="search-user-info">
+            <div class="search-user-name">${escapeHtml(user.name)}</div>
+            <div class="search-user-handle">${user.username ? '@' + escapeHtml(user.username) : escapeHtml(user.email)}</div>
+        </div>
+        ${!isFriend && !requestSent ? `<button class="btn-add-friend" data-user-id="${user.id}">Add Friend</button>` :
+          requestSent ? '<button class="btn-add-friend" disabled>Pending</button>' :
+          '<button class="btn-add-friend" disabled>Friends</button>'}
+    `;
+
+    searchUserResults.appendChild(item);
+
+    // Add friend handler
+    const addBtn = item.querySelector('.btn-add-friend');
+    if (addBtn && !addBtn.disabled) {
+        addBtn.addEventListener('click', async () => {
+            const userId = parseInt(addBtn.dataset.userId);
+            try {
+                await sendFriendRequest(userId);
+                addBtn.textContent = 'Sent';
+                addBtn.disabled = true;
+                await loadPendingRequests();
+            } catch (error) { alert(error.message); }
+        });
+    }
+}
+
 // ==================== Auth Functions ====================
 async function login(email, password) {
     const response = await fetch(`${API_BASE_URL}/auth/login/`, {
@@ -379,11 +689,11 @@ async function login(email, password) {
     return true;
 }
 
-async function register(email, password, passwordCheck) {
+async function register(email, name, username, password, passwordCheck) {
     const response = await fetch(`${API_BASE_URL}/auth/register/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, password_check: passwordCheck, name: email.split('@')[0] }),
+        body: JSON.stringify({ email, name, username: username || null, password, password_check: passwordCheck }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Registration failed');
@@ -399,6 +709,12 @@ async function logout() {
         localStorage.removeItem('authToken');
         if (websocket) { websocket.close(); websocket = null; }
         if (notificationWs) { notificationWs.close(); notificationWs = null; }
+        // Reset caches
+        usersCache = {};
+        friendsCache = [];
+        pendingRequestsCache = [];
+        currentActiveTab = 'chats';
+        currentFriendsTab = 'all';
     }
 }
 
@@ -431,33 +747,109 @@ async function getCurrentUserInfo() {
     } catch (error) { console.error('Error loading current user:', error); return null; }
 }
 
-async function createDirectChat(userEmail) {
-    const users = await getUsers();
-    const targetUser = users.find(u => u.email === userEmail);
-    if (!targetUser) throw new Error('User not found');
-    if (targetUser.id === currentUserId) throw new Error('Cannot create chat with yourself');
+// ==================== Friends API Functions ====================
+async function getMyFriends() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/users/me/friends`, {
+            headers: { 'Authorization': `Bearer ${authToken}` },
+        });
+        if (!response.ok) return [];
+        return await response.json();
+    } catch (error) { console.error('Error loading friends:', error); return []; }
+}
 
-    // Check existing
+async function getPendingFriendRequests() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/users/me/friends/requests/pending`, {
+            headers: { 'Authorization': `Bearer ${authToken}` },
+        });
+        if (!response.ok) return [];
+        return await response.json();
+    } catch (error) { console.error('Error loading friend requests:', error); return []; }
+}
+
+async function sendFriendRequest(addresseeId) {
+    const response = await fetch(`${API_BASE_URL}/users/me/friends/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+        body: JSON.stringify({ addressee_id: addresseeId }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to send friend request');
+    return data;
+}
+
+async function acceptFriendRequest(requesterId) {
+    const response = await fetch(`${API_BASE_URL}/users/me/friends/request/${requesterId}/accept`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` },
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to accept friend request');
+    return data;
+}
+
+async function declineFriendRequest(requesterId) {
+    const response = await fetch(`${API_BASE_URL}/users/me/friends/request/${requesterId}/decline`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` },
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to decline friend request');
+    return data;
+}
+
+async function removeFriend(friendId) {
+    const response = await fetch(`${API_BASE_URL}/users/me/friends/${friendId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${authToken}` },
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to remove friend');
+    return data;
+}
+
+async function searchUserByUsername(username) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/users/search/${encodeURIComponent(username)}`, {
+            headers: { 'Authorization': `Bearer ${authToken}` },
+        });
+        if (!response.ok) return null;
+        return await response.json();
+    } catch (error) { console.error('Error searching user:', error); return null; }
+}
+
+async function getAllUsers() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/users/`, {
+            headers: { 'Authorization': `Bearer ${authToken}` },
+        });
+        if (!response.ok) return [];
+        return await response.json();
+    } catch (error) { console.error('Error loading users:', error); return []; }
+}
+
+async function createDirectChat(friendId) {
+    if (friendId === currentUserId) throw new Error('Cannot create chat with yourself');
+
+    // Check existing direct chat with this friend
     const chats = await getChats();
-    const existingChat = chats.find(c =>
-        !c.is_group && c.members_count === 2
-    );
-
-    // We need to check members for existing direct chat
     for (const chat of chats) {
-        if (!chat.is_group && chat.members_count === 2) {
-            const members = await getChatMembers(chat.id);
-            const memberIds = members.map(m => m.user_id);
-            if (memberIds.includes(targetUser.id) && memberIds.includes(currentUserId)) {
-                return chat;
-            }
+        if (!chat.is_group) {
+            try {
+                const members = await getChatMembers(chat.id);
+                const memberIds = members.map(m => m.user_id);
+                if (memberIds.includes(friendId) && memberIds.includes(currentUserId)) {
+                    return chat;
+                }
+            } catch (e) { /* ignore */ }
         }
     }
 
     const response = await fetch(`${API_BASE_URL}/chats/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-        body: JSON.stringify({ user_id: targetUser.id }),
+        body: JSON.stringify({ user_id: friendId }),
     });
     if (!response.ok) {
         const error = await response.json();
@@ -788,35 +1180,27 @@ function renderChats(chats, animate = true) {
             chatItem.style.animation = 'none';
         }
 
-        // Determine display name
-        let chatName, subtitle;
+        // Determine display name and avatar
+        let chatName, subtitle, avatarHtml;
         if (chat.is_group) {
             chatName = chat.name || 'Group Chat';
             chatNamesCache[chat.id] = chatName;
             subtitle = `${chat.members_count || 0} members`;
+            avatarHtml = `<div class="chat-item-avatar">👥</div>`;
         } else {
-            // Direct chat — use cached name or find from members/usersCache
             chatName = chatNamesCache[chat.id];
             if (!chatName) {
                 chatName = getChatDisplayName(chat);
                 chatNamesCache[chat.id] = chatName;
             }
             subtitle = '';
+            const otherId = chatOtherUserId[chat.id];
+            avatarHtml = getUserAvatarHtml(otherId);
         }
 
         const lastMessage = chat.last_message_content || '';
         const lastMessageTime = chat.last_message_at ? formatTime(chat.last_message_at) : '';
         const unreadCount = chat.unread_count || 0;
-
-        // Online status dot for direct chats
-        let onlineDot = '';
-        if (!chat.is_group) {
-            const otherId = chatOtherUserId[chat.id];
-            const otherUser = otherId ? usersCache[otherId] : null;
-            if (otherUser && otherUser.is_online) {
-                onlineDot = '<span class="status-dot online"></span>';
-            }
-        }
 
         let lastMessagePreview = '';
         if (chat.last_message_file_url) {
@@ -830,9 +1214,12 @@ function renderChats(chats, animate = true) {
         chatItem.innerHTML = `
             <div class="chat-item-content">
                 <div class="chat-item-header">
-                    <div class="chat-item-name">
-                        ${onlineDot}
-                        ${escapeHtml(chatName)}
+                    <div class="chat-item-content-with-avatar">
+                        ${avatarHtml}
+                        <div>
+                            <div class="chat-item-name">${escapeHtml(chatName)}</div>
+                            ${subtitle ? `<div style="font-size:0.7rem;color:var(--text-secondary);">${escapeHtml(subtitle)}</div>` : ''}
+                        </div>
                     </div>
                     <div class="chat-item-time">${lastMessageTime}</div>
                 </div>
@@ -840,7 +1227,6 @@ function renderChats(chats, animate = true) {
                     <div class="chat-item-last-message">${escapeHtml(lastMessagePreview)}</div>
                     ${unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : ''}
                 </div>
-                ${subtitle ? `<div class="chat-item-members-info" style="font-size:0.7rem;color:var(--text-secondary);margin-top:4px;">${escapeHtml(subtitle)}</div>` : ''}
             </div>
         `;
 
@@ -943,11 +1329,27 @@ function createMessageElement(message, isSent) {
     messageDiv.addEventListener('mouseup', () => { if (pressTimer) clearTimeout(pressTimer); });
     messageDiv.addEventListener('mouseleave', () => { if (pressTimer) clearTimeout(pressTimer); });
 
+    // Build message avatar HTML
+    const senderId = message.sender_id;
+    const sender = usersCache[senderId] || {};
+    const initials = (sender.name || sender.email?.split('@')[0] || 'U').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+    const avatarHtml = sender.avatar_url
+        ? `<img src="${escapeHtml(sender.avatar_url)}" alt="Avatar">`
+        : initials;
+
     let html = '';
 
-    // Sender name for group chats (received messages)
-    if (currentChatIsGroup && !isSent) {
-        html += `<div class="message-sender-name">${escapeHtml(getUserDisplayName(message.sender_id))}</div>`;
+    // Sender avatar + name for received messages (direct & group)
+    if (!isSent) {
+        html += `<div class="message-sender-row">
+            <div class="message-avatar">${avatarHtml}</div>
+            ${currentChatIsGroup ? `<div class="message-sender-name">${escapeHtml(getUserDisplayName(senderId))}</div>` : ''}
+        </div>`;
+    } else if (isSent) {
+        html += `<div class="message-sender-row message-sender-row-sent">
+            ${currentChatIsGroup ? `<div class="message-sender-name">${escapeHtml(getUserDisplayName(senderId))}</div>` : ''}
+            <div class="message-avatar">${avatarHtml}</div>
+        </div>`;
     }
 
     // Reply quote
@@ -1066,6 +1468,19 @@ function updateChatItemOnlineStatus(userId, isOnline) {
 function updateUserOnlineStatus(userId) {
     const user = usersCache[userId];
     if (!user) return;
+
+    // Update header avatar
+    if (chatHeaderAvatar) {
+        if (user.avatar_url) {
+            chatHeaderAvatar.innerHTML = `<img src="${escapeHtml(user.avatar_url)}" alt="Avatar">`;
+        } else {
+            const initials = (user.name || 'U').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+            chatHeaderAvatar.innerHTML = initials;
+        }
+        chatHeaderAvatar.classList.remove('hidden');
+    }
+
+    // Update header status
     if (user.is_online) {
         chatHeaderStatus.innerHTML = '<span class="online-dot"></span> Online';
         chatHeaderStatus.classList.add('online');
@@ -1086,7 +1501,16 @@ async function loadChats() {
         const currentUser = await getCurrentUserInfo();
         if (currentUser) {
             currentUserId = currentUser.id;
-            usersCache[currentUserId] = { name: currentUser.name, email: currentUser.email, is_online: currentUser.is_online, last_seen: currentUser.last_seen };
+            usersCache[currentUserId] = {
+                name: currentUser.name,
+                email: currentUser.email,
+                username: currentUser.username,
+                phone: currentUser.phone,
+                bio: currentUser.bio,
+                avatar_url: currentUser.avatar_url,
+                is_online: currentUser.is_online,
+                last_seen: currentUser.last_seen
+            };
         }
         await loadUsers();
         const chats = await getChats();
@@ -1109,6 +1533,8 @@ async function loadChats() {
                         usersCache[otherMember.user_id] = {
                             name: otherMember.user_name || chatName,
                             email: otherMember.user_email || '',
+                            username: otherMember.user_username || null,
+                            avatar_url: otherMember.user_avatar_url || null,
                             is_online: false,
                             last_seen: null
                         };
@@ -1131,7 +1557,14 @@ async function loadUsers() {
     try {
         const users = await getUsers();
         users.forEach(user => {
-            usersCache[user.id] = { name: user.name, email: user.email, is_online: user.is_online, last_seen: user.last_seen };
+            usersCache[user.id] = {
+                name: user.name,
+                email: user.email,
+                username: user.username,
+                avatar_url: user.avatar_url,
+                is_online: user.is_online,
+                last_seen: user.last_seen
+            };
         });
     } catch (error) { console.error('Error loading users:', error); }
 }
@@ -1438,16 +1871,31 @@ function renderGroupMembers(members) {
     members.forEach(member => {
         const item = document.createElement('div');
         item.className = 'group-member-item';
-        const initials = getUserInitials(member.user_id);
+
+        // Cache user info
         const name = member.user_name || getUserDisplayName(member.user_id);
         const email = member.user_email || '';
+        usersCache[member.user_id] = {
+            name,
+            email,
+            username: member.user_username || null,
+            avatar_url: member.user_avatar_url || null,
+            is_online: false,
+            last_seen: null
+        };
+
+        // Build avatar HTML
+        const avatarHtml = member.user_avatar_url
+            ? `<img src="${escapeHtml(member.user_avatar_url)}" alt="Avatar">`
+            : getUserInitials(member.user_id);
+
         const isMe = member.user_id === currentUserId;
         const meMember = currentChatMembers.find(m => m.user_id === currentUserId);
         const isAdmin = meMember && meMember.role === 'admin';
         const canKick = isAdmin && member.role !== 'admin' && !isMe;
 
         item.innerHTML = `
-            <div class="group-member-avatar">${initials}</div>
+            <div class="group-member-avatar">${avatarHtml}</div>
             <div class="group-member-info">
                 <div class="group-member-name">${escapeHtml(name)}${isMe ? ' (you)' : ''}</div>
                 <div class="group-member-email">${escapeHtml(email)}</div>
@@ -1474,8 +1922,44 @@ function renderGroupMembers(members) {
 }
 
 // ==================== Modals ====================
-function openDirectChatModal() { showElement(directChatModal); directChatEmailInput.focus(); }
-function closeDirectChatModal() { hideElement(directChatModal); directChatForm.reset(); hideElement(directChatError); }
+async function openDirectChatModal() {
+    showElement(directChatModal);
+    await renderFriendCheckboxes();
+}
+
+function closeDirectChatModal() {
+    hideElement(directChatModal);
+    directChatForm.reset();
+    hideElement(directChatError);
+    hideElement(directChatNoFriends);
+}
+
+async function renderFriendCheckboxes() {
+    try {
+        const friends = await getMyFriends();
+        directChatFriendsSelect.innerHTML = '';
+
+        if (friends.length === 0) {
+            showElement(directChatNoFriends);
+            return;
+        }
+
+        hideElement(directChatNoFriends);
+
+        friends.forEach(friend => {
+            const div = document.createElement('label');
+            div.className = 'friend-checkbox';
+            const initials = (friend.name || 'U').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+            div.innerHTML = `
+                <input type="checkbox" name="direct-chat-friend" value="${friend.user_id}">
+                <div class="friend-avatar-select">${friend.avatar_url ? `<img src="${escapeHtml(friend.avatar_url)}" alt="Avatar">` : initials}</div>
+                <span class="friend-name-select">${escapeHtml(friend.name)}</span>
+                ${friend.username ? `<span class="friend-username-select">@${escapeHtml(friend.username)}</span>` : ''}
+            `;
+            directChatFriendsSelect.appendChild(div);
+        });
+    } catch (error) { console.error('Error loading friends for direct chat:', error); }
+}
 
 function openGroupChatModal() {
     showElement(groupChatModal);
@@ -1486,20 +1970,32 @@ function closeGroupChatModal() { hideElement(groupChatModal); groupChatForm.rese
 
 async function renderMemberCheckboxes() {
     try {
-        const users = await getUsers();
+        const friends = await getMyFriends();
         groupMembersSelect.innerHTML = '';
-        users.forEach(user => {
-            if (user.id === currentUserId) return; // Skip self
-            const div = document.createElement('label');
-            div.className = 'member-checkbox';
-            div.innerHTML = `
-                <input type="checkbox" name="group-member" value="${user.id}">
-                <span class="member-name">${escapeHtml(user.name)}</span>
-                <span class="member-email">${escapeHtml(user.email)}</span>
+        
+        if (friends.length === 0) {
+            groupMembersSelect.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 12px;">No friends to add. Add friends first!</p>';
+            return;
+        }
+        
+        friends.forEach(friend => {
+            if (friend.user_id === currentUserId) return;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'member-checkbox';
+            const initials = (friend.name || 'U').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+            wrapper.innerHTML = `
+                <label style="display:flex;align-items:center;gap:12px;width:100%;cursor:pointer;">
+                    <input type="checkbox" name="group-member" value="${friend.user_id}">
+                    <div class="member-avatar-small">${friend.avatar_url ? `<img src="${escapeHtml(friend.avatar_url)}" alt="Avatar">` : initials}</div>
+                    <div class="member-info-row">
+                        <span class="member-name">${escapeHtml(friend.name)}</span>
+                        ${friend.username ? `<span class="member-username">@${escapeHtml(friend.username)}</span>` : ''}
+                    </div>
+                </label>
             `;
-            groupMembersSelect.appendChild(div);
+            groupMembersSelect.appendChild(wrapper);
         });
-    } catch (error) { console.error('Error loading users for group creation:', error); }
+    } catch (error) { console.error('Error loading friends for group creation:', error); }
 }
 
 // ==================== Event Listeners ====================
@@ -1517,10 +2013,12 @@ loginForm.addEventListener('submit', async (e) => {
 registerForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = document.getElementById('register-email').value;
+    const name = document.getElementById('register-name').value;
+    const username = document.getElementById('register-username').value.trim() || null;
     const password = document.getElementById('register-password').value;
     const passwordCheck = document.getElementById('register-password-check').value;
     try {
-        await register(email, password, passwordCheck);
+        await register(email, name, username, password, passwordCheck);
         hideElement(registerForm); showElement(loginForm);
         document.getElementById('login-email').value = email;
     } catch (error) { showError(error.message); }
@@ -1534,17 +2032,16 @@ createDirectChatBtn.addEventListener('click', () => { openDirectChatModal(); });
 closeDirectModalBtn.addEventListener('click', closeDirectChatModal);
 directChatForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = directChatEmailInput.value.trim();
-    if (!email) { showModalError(directChatError, 'Please enter an email'); return; }
+    const selectedFriend = directChatFriendsSelect.querySelector('input[name="direct-chat-friend"]:checked');
+    if (!selectedFriend) { showModalError(directChatError, 'Please select a friend'); return; }
+    const friendId = parseInt(selectedFriend.value);
     try {
-        const chat = await createDirectChat(email);
+        const chat = await createDirectChat(friendId);
         closeDirectChatModal();
         await loadChats();
         // Navigate to the new chat
-        const otherMember = await getChatMembers(chat.id).then(m => m.find(m => m.user_id !== currentUserId));
-        const chatName = otherMember ? (otherMember.user_name || otherMember.user_email.split('@')[0]) : 'Chat';
-        navigateToChat(chat.id, chatName, false);
-        updateUserOnlineStatus(otherMember?.user_id);
+        const friendInfo = usersCache[friendId] || { name: 'Chat' };
+        navigateToChat(chat.id, friendInfo.name, false);
     } catch (error) { showModalError(directChatError, error.message); }
 });
 
@@ -1655,9 +2152,168 @@ if (searchInput) {
         else if (e.key === 'ArrowUp') { e.preventDefault(); navigateSearchResults(-1); }
     });
 }
+// Search navigation buttons
+if (searchPrevBtn) searchPrevBtn.addEventListener('click', () => navigateSearchResults(-1));
+if (searchNextBtn) searchNextBtn.addEventListener('click', () => navigateSearchResults(1));
 messageInput.addEventListener('keydown', (e) => { if (e.key === 'Escape' && editingMessageId) cancelEditing(); });
 
-// Init on page load
+// ==================== Main Tabs (Chats/Friends) ====================
+if (tabChats) {
+    tabChats.addEventListener('click', () => switchToTab('chats'));
+}
+if (tabFriends) {
+    tabFriends.addEventListener('click', () => switchToTab('friends'));
+}
+
+// ==================== Friends Sub-tabs ====================
+if (friendsTabAll) {
+    friendsTabAll.addEventListener('click', () => switchFriendsTab('all'));
+}
+if (friendsTabRequests) {
+    friendsTabRequests.addEventListener('click', () => switchFriendsTab('requests'));
+}
+if (friendsTabSearch) {
+    friendsTabSearch.addEventListener('click', () => switchFriendsTab('search'));
+}
+
+// ==================== Search User ====================
+if (searchUserBtn) {
+    searchUserBtn.addEventListener('click', searchUserAndRender);
+}
+if (searchUserInput) {
+    searchUserInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); searchUserAndRender(); }
+    });
+}
+
+// ==================== Profile Modal ====================
+function openProfileModal() {
+    const user = usersCache[currentUserId];
+    if (!user) return;
+
+    profileEmail.value = user.email || '';
+    profileName.value = user.name || '';
+    profileUsername.value = user.username || '';
+    profilePhone.value = user.phone || '';
+    profileBio.value = user.bio || '';
+
+    // Render avatar
+    if (user.avatar_url) {
+        profileAvatarDisplay.innerHTML = `<img src="${escapeHtml(user.avatar_url)}" alt="Avatar">`;
+    } else {
+        const initials = (user.name || 'U').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+        profileAvatarDisplay.innerHTML = initials;
+    }
+
+    hideElement(profileSuccess);
+    hideElement(profileError);
+    showElement(profileModal);
+}
+
+function closeProfileModal() {
+    hideElement(profileModal);
+}
+
+async function saveProfile() {
+    const updateData = {
+        name: profileName.value.trim(),
+        username: profileUsername.value.trim() || null,
+        phone: profilePhone.value.trim() || null,
+        bio: profileBio.value.trim() || null,
+    };
+
+    const response = await fetch(`${API_BASE_URL}/users/me`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+        body: JSON.stringify(updateData),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to update profile');
+    return data;
+}
+
+async function uploadAvatarFile(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(`${API_BASE_URL}/uploads/file`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` },
+        body: formData,
+    });
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to upload avatar');
+    }
+    return await response.json();
+}
+
+async function setAvatarUrl(avatarUrl) {
+    const response = await fetch(`${API_BASE_URL}/users/me/avatar?avatar_url=${encodeURIComponent(avatarUrl)}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${authToken}` },
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to update avatar');
+    return data;
+}
+
+if (profileBtn) profileBtn.addEventListener('click', openProfileModal);
+if (closeProfileBtn) closeProfileBtn.addEventListener('click', closeProfileModal);
+if (profileModal) {
+    profileModal.addEventListener('click', (e) => {
+        if (e.target === profileModal) closeProfileModal();
+    });
+}
+
+if (profileForm) {
+    profileForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideElement(profileError);
+        hideElement(profileSuccess);
+        try {
+            const updatedUser = await saveProfile();
+            // Update cache
+            usersCache[currentUserId] = {
+                ...usersCache[currentUserId],
+                name: updatedUser.name,
+                username: updatedUser.username,
+                phone: updatedUser.phone,
+                bio: updatedUser.bio,
+                avatar_url: updatedUser.avatar_url,
+            };
+            showElement(profileSuccess);
+            setTimeout(() => hideElement(profileSuccess), 3000);
+        } catch (error) {
+            profileError.textContent = error.message;
+            showElement(profileError);
+        }
+    });
+}
+
+if (avatarUploadInput) {
+    avatarUploadInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        hideElement(profileError);
+        hideElement(profileSuccess);
+        try {
+            const result = await uploadAvatarFile(file);
+            const avatarUrl = result.file_url;
+            await setAvatarUrl(avatarUrl);
+            // Update cache and display
+            usersCache[currentUserId].avatar_url = avatarUrl;
+            profileAvatarDisplay.innerHTML = `<img src="${escapeHtml(avatarUrl)}" alt="Avatar">`;
+            showElement(profileSuccess);
+            setTimeout(() => hideElement(profileSuccess), 3000);
+        } catch (error) {
+            profileError.textContent = error.message;
+            showElement(profileError);
+        }
+        avatarUploadInput.value = '';
+    });
+}
+
+// ==================== Logout update ====================
 window.addEventListener('DOMContentLoaded', () => {
     const savedToken = localStorage.getItem('authToken');
     if (savedToken) {
@@ -1665,5 +2321,27 @@ window.addEventListener('DOMContentLoaded', () => {
         showChatSection();
         loadChats();
         connectNotificationWebSocket();
+    }
+
+    // Fix mobile keyboard: adjust container height when keyboard shows/hides
+    if (window.visualViewport) {
+        const appContainer = document.querySelector('.app-container');
+        
+        window.visualViewport.addEventListener('resize', () => {
+            // Set container height to visible viewport area (excluding keyboard)
+            appContainer.style.height = window.visualViewport.height + 'px';
+            
+            // Scroll to bottom of messages when keyboard appears
+            if (messagesContainer) {
+                setTimeout(() => {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, 100);
+            }
+        });
+        
+        // Reset when keyboard closes
+        window.visualViewport.addEventListener('scroll', () => {
+            window.scrollTo(0, 0);
+        });
     }
 });

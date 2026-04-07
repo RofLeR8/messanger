@@ -25,6 +25,8 @@ services:
       - src/.env
     ports:
       - "8000:8000"
+    volumes:
+      - uploads_data:/app/src/app/uploads/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -32,3 +34,4 @@ services:
 
 volumes:
   postgres_data:
+  uploads_data:

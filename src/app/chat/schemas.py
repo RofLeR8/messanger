@@ -123,7 +123,9 @@ class SChatMemberRead(BaseModel):
     role: str = Field(..., description="Member role (admin/member)")
     joined_at: datetime = Field(..., description="When the user joined")
     user_name: Optional[str] = Field(None, description="User name")
+    user_username: Optional[str] = Field(None, description="User username")
     user_email: Optional[str] = Field(None, description="User email")
+    user_avatar_url: Optional[str] = Field(None, description="User avatar URL")
 
     class Config:
         from_attributes = True

@@ -68,3 +68,9 @@ yarn-error.log*
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# qwen
+.qwen/
+./.qwen/
+./.qwen/*
+./qwen/settings.json
