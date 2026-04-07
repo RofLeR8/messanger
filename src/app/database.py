@@ -1,9 +1,17 @@
 import os
+from pathlib import Path
 from sqlalchemy import func
 from datetime import datetime
 
 from sqlalchemy.orm import Mapped, mapped_column, DeclarativeBase
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine, AsyncSession
+from dotenv import load_dotenv
+
+# Load .env.local if it exists (for local development), otherwise .env (for Docker)
+_env_path = Path(__file__).resolve().parent.parent.parent / ".env.local"
+if not _env_path.exists():
+    _env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(_env_path)
 
 def get_database_url() -> str:
     user = os.getenv("POSTGRES_USER", "ws-test")

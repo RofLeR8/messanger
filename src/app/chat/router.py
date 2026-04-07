@@ -553,13 +553,16 @@ async def get_chat_members_endpoint(
     members = await get_chat_members(db, chat_id)
     result = []
     for member in members:
+        user = member.user
         member_data = SChatMemberRead(
             chat_id=member.chat_id,
             user_id=member.user_id,
             role=member.role.value,
             joined_at=member.joined_at,
-            user_name=member.user.name if member.user else None,
-            user_email=member.user.email if member.user else None,
+            user_name=user.name if user else None,
+            user_username=user.username if user else None,
+            user_email=user.email if user else None,
+            user_avatar_url=user.avatar_url if user else None,
         )
         result.append(member_data.model_dump())
 
