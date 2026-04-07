@@ -76,6 +76,8 @@ const toggleSearchBtn = document.getElementById('toggle-search-btn');
 const searchBar = document.getElementById('search-bar');
 const searchInput = document.getElementById('search-input');
 const closeSearchBtn = document.getElementById('close-search-btn');
+const searchPrevBtn = document.getElementById('search-prev-btn');
+const searchNextBtn = document.getElementById('search-next-btn');
 const pinnedPanel = document.getElementById('pinned-panel');
 const pinnedMessagesList = document.getElementById('pinned-messages-list');
 const closePinnedBtn = document.getElementById('close-pinned-btn');
@@ -1968,20 +1970,32 @@ function closeGroupChatModal() { hideElement(groupChatModal); groupChatForm.rese
 
 async function renderMemberCheckboxes() {
     try {
-        const users = await getUsers();
+        const friends = await getMyFriends();
         groupMembersSelect.innerHTML = '';
-        users.forEach(user => {
-            if (user.id === currentUserId) return; // Skip self
-            const div = document.createElement('label');
-            div.className = 'member-checkbox';
-            div.innerHTML = `
-                <input type="checkbox" name="group-member" value="${user.id}">
-                <span class="member-name">${escapeHtml(user.name)}</span>
-                <span class="member-email">${escapeHtml(user.email)}</span>
+        
+        if (friends.length === 0) {
+            groupMembersSelect.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 12px;">No friends to add. Add friends first!</p>';
+            return;
+        }
+        
+        friends.forEach(friend => {
+            if (friend.user_id === currentUserId) return;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'member-checkbox';
+            const initials = (friend.name || 'U').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+            wrapper.innerHTML = `
+                <label style="display:flex;align-items:center;gap:12px;width:100%;cursor:pointer;">
+                    <input type="checkbox" name="group-member" value="${friend.user_id}">
+                    <div class="member-avatar-small">${friend.avatar_url ? `<img src="${escapeHtml(friend.avatar_url)}" alt="Avatar">` : initials}</div>
+                    <div class="member-info-row">
+                        <span class="member-name">${escapeHtml(friend.name)}</span>
+                        ${friend.username ? `<span class="member-username">@${escapeHtml(friend.username)}</span>` : ''}
+                    </div>
+                </label>
             `;
-            groupMembersSelect.appendChild(div);
+            groupMembersSelect.appendChild(wrapper);
         });
-    } catch (error) { console.error('Error loading users for group creation:', error); }
+    } catch (error) { console.error('Error loading friends for group creation:', error); }
 }
 
 // ==================== Event Listeners ====================
@@ -2138,6 +2152,9 @@ if (searchInput) {
         else if (e.key === 'ArrowUp') { e.preventDefault(); navigateSearchResults(-1); }
     });
 }
+// Search navigation buttons
+if (searchPrevBtn) searchPrevBtn.addEventListener('click', () => navigateSearchResults(-1));
+if (searchNextBtn) searchNextBtn.addEventListener('click', () => navigateSearchResults(1));
 messageInput.addEventListener('keydown', (e) => { if (e.key === 'Escape' && editingMessageId) cancelEditing(); });
 
 // ==================== Main Tabs (Chats/Friends) ====================

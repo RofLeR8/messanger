@@ -482,9 +482,9 @@ body {
 /* Search Bar */
 .search-bar {
     background: var(--bg-secondary);
-    padding: 16px 24px;
+    padding: 12px 16px;
     display: flex;
-    gap: 12px;
+    gap: 8px;
     align-items: center;
     border-bottom: 1px solid var(--border-color);
     animation: slideDown 0.3s ease;
@@ -492,13 +492,41 @@ body {
 
 .search-input {
     flex: 1;
-    padding: 12px 18px;
+    min-width: 0;
+    padding: 10px 14px;
     border: 2px solid var(--border-color);
     border-radius: 12px;
     background: var(--bg-primary);
     color: var(--text-primary);
     font-size: 0.95rem;
     transition: all var(--transition-fast);
+}
+
+.search-nav-buttons {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.search-nav-buttons .btn-tiny {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    transition: all var(--transition-fast);
+}
+
+.search-nav-buttons .btn-tiny:hover {
+    border-color: var(--accent-primary);
+    background: var(--accent-primary);
+    color: white;
 }
 
 .search-input:focus {
@@ -1165,6 +1193,17 @@ body {
         font-size: 16px !important;
     }
 
+    /* Larger touch targets for search navigation on mobile */
+    .search-bar {
+        padding: 10px 12px;
+        gap: 6px;
+    }
+
+    .search-nav-buttons .btn-tiny {
+        width: 40px;
+        height: 40px;
+    }
+
     .auth-box {
         padding: 30px 25px;
     }
@@ -1355,7 +1394,7 @@ body {
     margin-top: 8px;
 }
 
-/* ==================== Member Select ==================== */
+/* ==================== Member Select (Group Chat Modal) ==================== */
 .member-select-container {
     max-height: 250px;
     overflow-y: auto;
@@ -1366,35 +1405,114 @@ body {
 }
 
 .member-checkbox {
-    display: flex;
-    align-items: center;
-    padding: 10px 12px;
+    padding: 4px 8px;
     border-radius: 8px;
     transition: background var(--transition-fast);
-    cursor: pointer;
 }
 
 .member-checkbox:hover {
     background: var(--bg-tertiary);
 }
 
-.member-checkbox input[type="checkbox"] {
-    margin-right: 12px;
-    width: 18px;
-    height: 18px;
-    accent-color: var(--accent-primary);
+/* Custom checkbox */
+.member-checkbox label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
     cursor: pointer;
 }
 
-.member-checkbox .member-name {
-    font-size: 0.95rem;
-    color: var(--text-primary);
-    flex: 1;
+.member-checkbox input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    min-height: 22px;
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+    position: relative;
+    transition: all var(--transition-fast);
+    margin: 0;
 }
 
-.member-checkbox .member-email {
-    font-size: 0.8rem;
+.member-checkbox input[type="checkbox"]:hover {
+    border-color: var(--accent-primary);
+}
+
+.member-checkbox input[type="checkbox"]:checked {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    animation: checkPop 0.3s ease;
+}
+
+.member-checkbox input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 5px;
+    height: 9px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: translate(-50%, -60%) rotate(45deg);
+}
+
+@keyframes checkPop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+}
+
+.member-avatar-small {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.member-avatar-small img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.member-info-row {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.member-checkbox .member-name {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.member-checkbox .member-username {
+    font-size: 0.75rem;
     color: var(--text-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 /* ==================== Group Members Panel ==================== */

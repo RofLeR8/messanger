@@ -576,7 +576,10 @@ async def add_member_endpoint(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    """Add a member to a group chat (only admin can add)."""
+    """Add a member to a group chat (only admin can add, must be a friend)."""
+    from app.users.crud import get_friendship
+    from app.users.models import FriendshipStatus
+
     current_user_id = user.id
     chat = await _verify_user_in_chat(db, chat_id, current_user_id)
 
@@ -584,6 +587,14 @@ async def add_member_endpoint(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot add members to a direct chat"
+        )
+
+    # Check if the target user is a friend
+    friendship = await get_friendship(db, current_user_id, member_data.user_id)
+    if not friendship or friendship.status != FriendshipStatus.ACCEPTED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You can only add friends to group chats"
         )
 
     role = await get_member_role(db, chat_id, current_user_id)
