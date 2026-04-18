@@ -30,6 +30,7 @@ let searchResults = [];
 let currentSearchIndex = -1;
 let searchNavTimeout = null;
 let searchTimeout = null;
+let selectedUserInfoId = null;
 
 // Context menu state
 let contextMenuTarget = null;
@@ -116,6 +117,17 @@ const profileAvatarDisplay = document.getElementById('profile-avatar-display');
 const avatarUploadInput = document.getElementById('avatar-upload-input');
 const profileSuccess = document.getElementById('profile-success');
 const profileError = document.getElementById('profile-error');
+const userInfoModal = document.getElementById('user-info-modal');
+const closeUserInfoBtn = document.getElementById('close-user-info-btn');
+const userInfoAvatar = document.getElementById('user-info-avatar');
+const userInfoName = document.getElementById('user-info-name');
+const userInfoUsername = document.getElementById('user-info-username');
+const userInfoEmail = document.getElementById('user-info-email');
+const userInfoPhone = document.getElementById('user-info-phone');
+const userInfoBio = document.getElementById('user-info-bio');
+const userInfoStatus = document.getElementById('user-info-status');
+const userInfoChatBtn = document.getElementById('user-info-chat-btn');
+const userInfoFriendBtn = document.getElementById('user-info-friend-btn');
 
 const groupChatModal = document.getElementById('group-chat-modal');
 const groupChatForm = document.getElementById('group-chat-form');
@@ -194,7 +206,7 @@ function handleScroll() {
 }
 
 async function loadMoreMessages() {
-    if (!currentChatId || isLoadingMore) return;
+    if (!currentChatId || isLoadingMore) return false;
     isLoadingMore = true;
 
     try {
@@ -209,7 +221,7 @@ async function loadMoreMessages() {
         const messages = await response.json();
         if (messages.length === 0) {
             // No more messages
-            return;
+            return false;
         }
 
         currentChatOffset += messages.length;
@@ -232,9 +244,11 @@ async function loadMoreMessages() {
         // Restore scroll position
         const newScrollHeight = messagesContainer.scrollHeight;
         messagesContainer.scrollTop = newScrollHeight - oldScrollHeight;
+        return true;
 
     } catch (error) {
         console.error('Error loading more messages:', error);
+        return false;
     } finally {
         isLoadingMore = false;
     }
@@ -252,11 +266,29 @@ function scrollToBottom() {
 function scrollToMessage(messageId) {
     const messageEl = document.querySelector(`.message[data-message-id="${messageId}"]`);
     if (messageEl) {
-        messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Avoid viewport scroll on mobile: scroll only inside messages container.
+        const targetTop = messageEl.offsetTop - (messagesContainer.clientHeight / 2) + (messageEl.offsetHeight / 2);
+        messagesContainer.scrollTo({
+            top: Math.max(0, targetTop),
+            behavior: 'smooth',
+        });
         messageEl.style.transition = 'background 0.3s ease';
         messageEl.style.background = 'rgba(0, 217, 255, 0.3)';
         setTimeout(() => { messageEl.style.background = ''; }, 2000);
+        return true;
     }
+    return false;
+}
+
+async function ensureMessageLoadedAndScroll(messageId) {
+    if (scrollToMessage(messageId)) return true;
+    // Load older history chunks until message appears or history ends.
+    for (let i = 0; i < 40; i++) {
+        const loadedAny = await loadMoreMessages();
+        if (!loadedAny) break;
+        if (scrollToMessage(messageId)) return true;
+    }
+    return false;
 }
 
 function getUserDisplayName(userId) {
@@ -273,20 +305,103 @@ function getUserInitials(userId) {
 function getUserAvatarHtml(userId, size = '42') {
     const user = usersCache[userId] || {};
     const initials = getUserInitials(userId);
+    const clickableClass = userId ? ' user-clickable' : '';
+    const clickableAttrs = userId ? `data-user-id="${userId}" role="button" tabindex="0"` : '';
     if (user.avatar_url) {
-        return `<div class="chat-item-avatar"><img src="${escapeHtml(user.avatar_url)}" alt="Avatar">
+        return `<div class="chat-item-avatar${clickableClass}" ${clickableAttrs}><img src="${escapeHtml(user.avatar_url)}" alt="Avatar">
             <span class="avatar-status-dot ${user.is_online ? 'online' : ''}"></span></div>`;
     }
-    return `<div class="chat-item-avatar">${initials}
+    return `<div class="chat-item-avatar${clickableClass}" ${clickableAttrs}>${initials}
         <span class="avatar-status-dot ${user.is_online ? 'online' : ''}"></span></div>`;
 }
 
-function getFriendAvatarHtml(user, sizeClass = 'friend-avatar') {
+function getFriendAvatarHtml(user, sizeClass = 'friend-avatar', userId = null) {
+    const targetUserId = userId || user.user_id || user.id || null;
+    const clickableClass = targetUserId ? ' user-clickable' : '';
+    const clickableAttrs = targetUserId ? `data-user-id="${targetUserId}" role="button" tabindex="0"` : '';
     if (user.avatar_url) {
-        return `<div class="${sizeClass}"><img src="${escapeHtml(user.avatar_url)}" alt="Avatar"></div>`;
+        return `<div class="${sizeClass}${clickableClass}" ${clickableAttrs}><img src="${escapeHtml(user.avatar_url)}" alt="Avatar"></div>`;
     }
     const initials = (user.name || 'U').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
-    return `<div class="${sizeClass}">${initials}</div>`;
+    return `<div class="${sizeClass}${clickableClass}" ${clickableAttrs}>${initials}</div>`;
+}
+
+async function getUserInfoById(userId) {
+    const response = await fetch(`${API_BASE_URL}/users/${userId}`, {
+        headers: { 'Authorization': `Bearer ${authToken}` },
+    });
+    if (!response.ok) throw new Error('Failed to load user info');
+    return await response.json();
+}
+
+function renderUserInfoModal(user) {
+    const userName = user.name || user.email?.split('@')[0] || 'Unknown user';
+    if (user.avatar_url) {
+        userInfoAvatar.innerHTML = `<img src="${escapeHtml(user.avatar_url)}" alt="Avatar">`;
+    } else {
+        const initials = userName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+        userInfoAvatar.innerHTML = initials;
+    }
+    userInfoName.textContent = userName;
+    userInfoUsername.textContent = user.username ? `@${user.username}` : '—';
+    userInfoEmail.textContent = user.email || '—';
+    userInfoPhone.textContent = user.phone || '—';
+    userInfoBio.textContent = user.bio || '—';
+    userInfoStatus.textContent = user.is_online ? 'Online' : (user.last_seen ? `Last seen ${formatLastSeen(user.last_seen)}` : 'Offline');
+}
+
+async function openUserInfoModal(userId) {
+    if (!userId || !authToken) return;
+    selectedUserInfoId = userId;
+    try {
+        const userInfo = await getUserInfoById(userId);
+        usersCache[userId] = { ...(usersCache[userId] || {}), ...userInfo };
+        renderUserInfoModal(usersCache[userId]);
+        updateUserInfoActions(userId);
+        showElement(userInfoModal);
+    } catch (error) {
+        const fallbackUser = usersCache[userId];
+        if (!fallbackUser) {
+            alert('Failed to load user info');
+            return;
+        }
+        renderUserInfoModal(fallbackUser);
+        updateUserInfoActions(userId);
+        showElement(userInfoModal);
+    }
+}
+
+function closeUserInfoModal() {
+    hideElement(userInfoModal);
+    selectedUserInfoId = null;
+}
+
+function updateUserInfoActions(userId) {
+    if (!userInfoChatBtn || !userInfoFriendBtn) return;
+    const isSelf = userId === currentUserId;
+    const isFriend = friendsCache.some(f => f.user_id === userId);
+    const sentPending = pendingRequestsCache.some(r => r.addressee_id === userId);
+    const hasIncoming = pendingRequestsCache.some(r => r.requester_id === userId);
+
+    userInfoChatBtn.disabled = isSelf;
+    userInfoChatBtn.textContent = isSelf ? 'This is you' : 'Start chat';
+
+    if (isSelf) {
+        userInfoFriendBtn.disabled = true;
+        userInfoFriendBtn.textContent = 'This is you';
+    } else if (isFriend) {
+        userInfoFriendBtn.disabled = true;
+        userInfoFriendBtn.textContent = 'Friends';
+    } else if (sentPending) {
+        userInfoFriendBtn.disabled = true;
+        userInfoFriendBtn.textContent = 'Request sent';
+    } else if (hasIncoming) {
+        userInfoFriendBtn.disabled = true;
+        userInfoFriendBtn.textContent = 'Incoming request';
+    } else {
+        userInfoFriendBtn.disabled = false;
+        userInfoFriendBtn.textContent = 'Add friend';
+    }
 }
 
 // ==================== Page Navigation ====================
@@ -379,15 +494,27 @@ function navigateToChat(chatId, chatName, isGroup) {
     if (isGroup) {
         chatHeaderStatus.innerHTML = '';
         chatHeaderStatus.classList.remove('online');
-        if (chatHeaderAvatar) chatHeaderAvatar.classList.add('hidden');
+        if (chatHeaderAvatar) {
+            chatHeaderAvatar.classList.add('hidden');
+            chatHeaderAvatar.removeAttribute('data-user-id');
+            chatHeaderAvatar.classList.remove('user-clickable');
+        }
+        chatTitle.classList.remove('user-clickable');
+        chatTitle.removeAttribute('data-user-id');
     } else {
         // For direct chats, show loading then update with actual status
         chatHeaderStatus.innerHTML = '<span class="offline-dot"></span> Loading...';
-        if (chatHeaderAvatar) chatHeaderAvatar.classList.add('hidden');
+        if (chatHeaderAvatar) {
+            chatHeaderAvatar.classList.add('hidden');
+            chatHeaderAvatar.classList.add('user-clickable');
+        }
         // Load the other user's status from chat members
         getChatMembers(chatId).then(members => {
             const otherMember = members.find(m => m.user_id !== currentUserId);
             if (otherMember) {
+                if (chatHeaderAvatar) chatHeaderAvatar.dataset.userId = String(otherMember.user_id);
+                chatTitle.classList.add('user-clickable');
+                chatTitle.dataset.userId = String(otherMember.user_id);
                 // Cache the user info with avatar
                 usersCache[otherMember.user_id] = {
                     name: otherMember.user_name || otherMember.user_email?.split('@')[0],
@@ -403,6 +530,8 @@ function navigateToChat(chatId, chatName, isGroup) {
         }).catch(() => {
             chatHeaderStatus.innerHTML = '';
             if (chatHeaderAvatar) chatHeaderAvatar.classList.add('hidden');
+            chatTitle.classList.remove('user-clickable');
+            chatTitle.removeAttribute('data-user-id');
         });
     }
 
@@ -429,6 +558,18 @@ function stopNotificationCheck() {}
 
 // ==================== Tab Switching ====================
 function switchToTab(tab) {
+    // If user switches tabs while viewing a specific chat, close chat detail view first.
+    if (chatPage.classList.contains('active')) {
+        currentChatId = null;
+        currentChatIsGroup = false;
+        currentChatMembers = [];
+        if (websocket) { websocket.close(); websocket = null; }
+        hideElement(groupMembersPanel);
+        chatPage.classList.remove('active');
+        chatPage.classList.add('inactive');
+        document.querySelectorAll('.chat-item').forEach(item => item.classList.remove('active'));
+    }
+
     currentActiveTab = tab;
     tabChats.classList.toggle('active', tab === 'chats');
     tabFriends.classList.toggle('active', tab === 'friends');
@@ -496,11 +637,11 @@ function renderFriendsList(friends) {
         item.innerHTML = `
             ${getFriendAvatarHtml(friend)}
             <div class="friend-info">
-                <div class="friend-name">
+                <div class="friend-name user-clickable" data-user-id="${friend.user_id}" role="button" tabindex="0">
                     ${friend.is_online ? '<span class="status-dot online"></span>' : ''}
                     ${escapeHtml(friend.name)}
                 </div>
-                ${friend.username ? `<div class="friend-username">@${escapeHtml(friend.username)}</div>` : ''}
+                ${friend.username ? `<div class="friend-username user-clickable" data-user-id="${friend.user_id}" role="button" tabindex="0">@${escapeHtml(friend.username)}</div>` : ''}
             </div>
             <div class="friend-actions">
                 <button class="btn-chat" data-friend-id="${friend.user_id}" title="Start chat">
@@ -573,10 +714,10 @@ function renderPendingRequests(requests) {
         };
 
         item.innerHTML = `
-            ${getFriendAvatarHtml(requester)}
+            ${getFriendAvatarHtml(requester, 'friend-avatar', req.requester_id)}
             <div class="pending-request-info">
-                <div class="pending-request-name">${escapeHtml(req.requester_name)}</div>
-                ${req.requester_username ? `<div class="pending-request-username">@${escapeHtml(req.requester_username)}</div>` : ''}
+                <div class="pending-request-name user-clickable" data-user-id="${req.requester_id}" role="button" tabindex="0">${escapeHtml(req.requester_name)}</div>
+                ${req.requester_username ? `<div class="pending-request-username user-clickable" data-user-id="${req.requester_id}" role="button" tabindex="0">@${escapeHtml(req.requester_username)}</div>` : ''}
             </div>
             <div class="pending-request-actions">
                 <button class="btn-accept" data-requester-id="${req.requester_id}">Accept</button>
@@ -649,8 +790,8 @@ async function searchUserAndRender() {
     item.innerHTML = `
         ${getFriendAvatarHtml(user)}
         <div class="search-user-info">
-            <div class="search-user-name">${escapeHtml(user.name)}</div>
-            <div class="search-user-handle">${user.username ? '@' + escapeHtml(user.username) : escapeHtml(user.email)}</div>
+            <div class="search-user-name user-clickable" data-user-id="${user.id}" role="button" tabindex="0">${escapeHtml(user.name)}</div>
+            <div class="search-user-handle user-clickable" data-user-id="${user.id}" role="button" tabindex="0">${user.username ? '@' + escapeHtml(user.username) : escapeHtml(user.email)}</div>
         </div>
         ${!isFriend && !requestSent ? `<button class="btn-add-friend" data-user-id="${user.id}">Add Friend</button>` :
           requestSent ? '<button class="btn-add-friend" disabled>Pending</button>' :
@@ -1182,11 +1323,13 @@ function renderChats(chats, animate = true) {
 
         // Determine display name and avatar
         let chatName, subtitle, avatarHtml;
+        let nameHtml = '';
         if (chat.is_group) {
             chatName = chat.name || 'Group Chat';
             chatNamesCache[chat.id] = chatName;
             subtitle = `${chat.members_count || 0} members`;
             avatarHtml = `<div class="chat-item-avatar">👥</div>`;
+            nameHtml = `<div class="chat-item-name">${escapeHtml(chatName)}</div>`;
         } else {
             chatName = chatNamesCache[chat.id];
             if (!chatName) {
@@ -1196,6 +1339,7 @@ function renderChats(chats, animate = true) {
             subtitle = '';
             const otherId = chatOtherUserId[chat.id];
             avatarHtml = getUserAvatarHtml(otherId);
+            nameHtml = `<div class="chat-item-name user-clickable" data-user-id="${otherId}" role="button" tabindex="0">${escapeHtml(chatName)}</div>`;
         }
 
         const lastMessage = chat.last_message_content || '';
@@ -1217,7 +1361,7 @@ function renderChats(chats, animate = true) {
                     <div class="chat-item-content-with-avatar">
                         ${avatarHtml}
                         <div>
-                            <div class="chat-item-name">${escapeHtml(chatName)}</div>
+                            ${nameHtml}
                             ${subtitle ? `<div style="font-size:0.7rem;color:var(--text-secondary);">${escapeHtml(subtitle)}</div>` : ''}
                         </div>
                     </div>
@@ -1342,13 +1486,13 @@ function createMessageElement(message, isSent) {
     // Sender avatar + name for received messages (direct & group)
     if (!isSent) {
         html += `<div class="message-sender-row">
-            <div class="message-avatar">${avatarHtml}</div>
-            ${currentChatIsGroup ? `<div class="message-sender-name">${escapeHtml(getUserDisplayName(senderId))}</div>` : ''}
+            <div class="message-avatar user-clickable" data-user-id="${senderId}" role="button" tabindex="0">${avatarHtml}</div>
+            ${currentChatIsGroup ? `<div class="message-sender-name user-clickable" data-user-id="${senderId}" role="button" tabindex="0">${escapeHtml(getUserDisplayName(senderId))}</div>` : ''}
         </div>`;
     } else if (isSent) {
         html += `<div class="message-sender-row message-sender-row-sent">
-            ${currentChatIsGroup ? `<div class="message-sender-name">${escapeHtml(getUserDisplayName(senderId))}</div>` : ''}
-            <div class="message-avatar">${avatarHtml}</div>
+            ${currentChatIsGroup ? `<div class="message-sender-name user-clickable" data-user-id="${senderId}" role="button" tabindex="0">${escapeHtml(getUserDisplayName(senderId))}</div>` : ''}
+            <div class="message-avatar user-clickable" data-user-id="${senderId}" role="button" tabindex="0">${avatarHtml}</div>
         </div>`;
     }
 
@@ -1478,6 +1622,8 @@ function updateUserOnlineStatus(userId) {
             chatHeaderAvatar.innerHTML = initials;
         }
         chatHeaderAvatar.classList.remove('hidden');
+        chatHeaderAvatar.classList.add('user-clickable');
+        chatHeaderAvatar.dataset.userId = String(userId);
     }
 
     // Update header status
@@ -1604,7 +1750,23 @@ function hideContextMenu() {
     contextChatId = null;
 }
 
-document.addEventListener('click', (e) => { if (contextMenu && !e.target.closest('#context-menu')) hideContextMenu(); });
+document.addEventListener('click', (e) => {
+    const userTarget = e.target.closest('.user-clickable');
+    if (userTarget && userTarget.dataset.userId) {
+        e.preventDefault();
+        e.stopPropagation();
+        openUserInfoModal(parseInt(userTarget.dataset.userId));
+        return;
+    }
+    if (contextMenu && !e.target.closest('#context-menu')) hideContextMenu();
+});
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const userTarget = e.target.closest('.user-clickable');
+    if (!userTarget || !userTarget.dataset.userId) return;
+    e.preventDefault();
+    openUserInfoModal(parseInt(userTarget.dataset.userId));
+});
 document.addEventListener('contextmenu', (e) => { if (e.target.closest('.message')) { e.preventDefault(); return false; } }, { passive: false });
 
 contextMenu.addEventListener('click', async (e) => {
@@ -1733,9 +1895,17 @@ function renderPinnedMessages(messages) {
         if (!preview) preview = '<empty message>';
         item.innerHTML = `<div class="pinned-message-content">${escapeHtml(preview)}</div>
             <div class="pinned-message-meta"><span>${formatTime(msg.created_at)}</span><span>📌</span></div>`;
-        item.addEventListener('click', () => {
+        item.addEventListener('click', async () => {
+            const found = await ensureMessageLoadedAndScroll(msg.id);
+            if (!found) {
+                alert('Could not locate pinned message in chat history');
+                return;
+            }
             const el = document.querySelector(`.message[data-message-id="${msg.id}"]`);
-            if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.style.animation = 'pulse 0.5s ease'; setTimeout(() => el.style.animation = '', 500); }
+            if (el) {
+                el.style.animation = 'pulse 0.5s ease';
+                setTimeout(() => { el.style.animation = ''; }, 500);
+            }
         });
         pinnedMessagesList.appendChild(item);
     });
@@ -1895,9 +2065,9 @@ function renderGroupMembers(members) {
         const canKick = isAdmin && member.role !== 'admin' && !isMe;
 
         item.innerHTML = `
-            <div class="group-member-avatar">${avatarHtml}</div>
+            <div class="group-member-avatar user-clickable" data-user-id="${member.user_id}" role="button" tabindex="0">${avatarHtml}</div>
             <div class="group-member-info">
-                <div class="group-member-name">${escapeHtml(name)}${isMe ? ' (you)' : ''}</div>
+                <div class="group-member-name user-clickable" data-user-id="${member.user_id}" role="button" tabindex="0">${escapeHtml(name)}${isMe ? ' (you)' : ''}</div>
                 <div class="group-member-email">${escapeHtml(email)}</div>
             </div>
             <span class="group-member-role">${member.role}</span>
@@ -2103,6 +2273,10 @@ sendMessageBtn.addEventListener('click', async () => {
 
 // Group members panel events
 chatTitle.addEventListener('click', () => {
+    if (!currentChatIsGroup && currentChatId && chatOtherUserId[currentChatId]) {
+        openUserInfoModal(chatOtherUserId[currentChatId]);
+        return;
+    }
     if (currentChatIsGroup && currentChatId) {
         if (groupMembersPanel.classList.contains('hidden')) {
             loadChatMembersPanel(currentChatId);
@@ -2262,6 +2436,50 @@ if (closeProfileBtn) closeProfileBtn.addEventListener('click', closeProfileModal
 if (profileModal) {
     profileModal.addEventListener('click', (e) => {
         if (e.target === profileModal) closeProfileModal();
+    });
+}
+if (closeUserInfoBtn) closeUserInfoBtn.addEventListener('click', closeUserInfoModal);
+if (userInfoModal) {
+    userInfoModal.addEventListener('click', (e) => {
+        if (e.target === userInfoModal) closeUserInfoModal();
+    });
+}
+if (userInfoChatBtn) {
+    userInfoChatBtn.addEventListener('click', async () => {
+        if (!selectedUserInfoId || selectedUserInfoId === currentUserId) return;
+        try {
+            const targetUserId = selectedUserInfoId;
+            const chat = await createDirectChat(targetUserId);
+            let chatDisplayName = '';
+            try {
+                const freshUser = await getUserInfoById(targetUserId);
+                usersCache[targetUserId] = { ...(usersCache[targetUserId] || {}), ...freshUser };
+                chatDisplayName = freshUser.name || freshUser.email?.split('@')[0] || '';
+            } catch (_) {
+                chatDisplayName = getUserDisplayName(targetUserId);
+            }
+            closeUserInfoModal();
+            await loadChats();
+            if (!chatDisplayName || chatDisplayName.startsWith('User ')) {
+                chatDisplayName = chatNamesCache[chat.id] || getUserDisplayName(targetUserId);
+            }
+            navigateToChat(chat.id, chatDisplayName, false);
+        } catch (error) {
+            alert('Failed to create chat: ' + error.message);
+        }
+    });
+}
+if (userInfoFriendBtn) {
+    userInfoFriendBtn.addEventListener('click', async () => {
+        if (!selectedUserInfoId || selectedUserInfoId === currentUserId || userInfoFriendBtn.disabled) return;
+        try {
+            await sendFriendRequest(selectedUserInfoId);
+            userInfoFriendBtn.disabled = true;
+            userInfoFriendBtn.textContent = 'Request sent';
+            await loadPendingRequests();
+        } catch (error) {
+            alert(error.message);
+        }
     });
 }
 
