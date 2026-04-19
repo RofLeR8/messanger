@@ -15,7 +15,13 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 # Allowed file types
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-ALLOWED_FILE_TYPES = ALLOWED_IMAGE_TYPES | {"application/pdf", "text/plain", "application/zip", "application/x-zip-compressed"}
+ALLOWED_FILE_TYPES = ALLOWED_IMAGE_TYPES | {
+    "application/pdf",
+    "text/plain",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/octet-stream",
+}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 
@@ -27,11 +33,13 @@ async def upload_file(
 ):
     """Upload a file and return the file URL."""
 
+    normalized_content_type = file.content_type or "application/octet-stream"
+
     # Validate file type
-    if file.content_type not in ALLOWED_FILE_TYPES:
+    if normalized_content_type not in ALLOWED_FILE_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File type {file.content_type} not allowed. Allowed types: {', '.join(ALLOWED_FILE_TYPES)}"
+            detail=f"File type {normalized_content_type} not allowed. Allowed types: {', '.join(ALLOWED_FILE_TYPES)}"
         )
 
     # Read file content to check size
@@ -60,12 +68,12 @@ async def upload_file(
     file_url = f"/uploads/files/{date_dir}/{unique_filename}"
 
     # Determine file type category
-    file_type = "image" if file.content_type.startswith("image/") else "file"
+    file_type = "image" if normalized_content_type.startswith("image/") else "file"
 
     return {
         "file_url": file_url,
         "file_name": file.filename or unique_filename,
         "file_type": file_type,
-        "content_type": file.content_type,
+        "content_type": normalized_content_type,
         "size": len(content)
     }

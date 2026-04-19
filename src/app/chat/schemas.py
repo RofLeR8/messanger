@@ -3,6 +3,14 @@ from datetime import datetime
 from typing import Optional, List
 
 
+class SEncryptedPayload(BaseModel):
+    ciphertext: str = Field(..., description="Base64 ciphertext")
+    nonce: str = Field(..., description="Base64 nonce/iv")
+    aad: Optional[str] = Field(None, description="Optional base64 additional authenticated data")
+    encryption_version: str = Field(default="v1", description="Encryption schema version")
+    sender_key_id: Optional[str] = Field(None, description="Sender device key id")
+
+
 class SMessageRead(BaseModel):
     id: int = Field(..., description="Message id")
     sender_id: int = Field(..., description="Sender id")
@@ -30,14 +38,17 @@ class SMessageRead(BaseModel):
     in_reply_to_user_id: Optional[int] = Field(None, description="ID of user being replied to")
     reply_to_content: Optional[str] = Field(None, description="Content of replied message")
     reply_to_sender_name: Optional[str] = Field(None, description="Name of user being replied to")
+    encrypted_payload: Optional[SEncryptedPayload] = Field(None, description="Encrypted message payload")
+    is_encrypted: bool = Field(False, description="Whether message is encrypted")
 
 
 class SMessageCreate(BaseModel):
-    content: str = Field(..., description="Message content")
+    content: Optional[str] = Field(None, description="Legacy plaintext message content")
     file_url: Optional[str] = Field(None, description="File URL")
     file_type: Optional[str] = Field(None, description="File type (image/file)")
     file_name: Optional[str] = Field(None, description="File name")
     in_reply_to_id: Optional[int] = Field(None, description="ID of message to reply to")
+    encrypted_payload: Optional[SEncryptedPayload] = Field(None, description="Encrypted message payload")
 
 
 class SMessageUpdate(BaseModel):
@@ -48,7 +59,8 @@ class SMessageUpdate(BaseModel):
 
 
 class SMessageEdit(BaseModel):
-    content: str = Field(..., description="New message content")
+    content: Optional[str] = Field(None, description="Legacy new message content")
+    encrypted_payload: Optional[SEncryptedPayload] = Field(None, description="Encrypted replacement payload")
 
 
 class SChatRead(BaseModel):
@@ -65,6 +77,9 @@ class SChatRead(BaseModel):
     last_message_file_url: Optional[str] = Field(None, description="Last message file URL")
     last_message_file_type: Optional[str] = Field(None, description="Last message file type (image/file)")
     last_message_file_name: Optional[str] = Field(None, description="Last message file name")
+    last_message_encrypted_payload: Optional[SEncryptedPayload] = Field(
+        None, description="Last message E2EE payload for client-side preview"
+    )
     # Members info (for group chats)
     members_count: Optional[int] = Field(None, description="Number of members in the chat")
 
@@ -153,4 +168,21 @@ class SChatDetail(BaseModel):
     last_message_sender_id: Optional[int] = Field(None, description="Last message sender id")
     unread_count: int = Field(0, description="Unread messages count")
     members_count: Optional[int] = Field(None, description="Number of members in the chat")
+    last_message_encrypted_payload: Optional[SEncryptedPayload] = Field(
+        None, description="Last message E2EE payload for client-side preview"
+    )
+
+
+class SChatEncryptedKeyCreate(BaseModel):
+    key_id: str = Field(..., min_length=1, max_length=128)
+    encrypted_chat_key: str = Field(..., min_length=1)
+    key_version: int = Field(default=1, ge=1)
+
+
+class SChatEncryptedKeyRead(BaseModel):
+    chat_id: int
+    user_id: int
+    key_id: str
+    encrypted_chat_key: str
+    key_version: int
     

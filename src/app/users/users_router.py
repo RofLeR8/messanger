@@ -15,11 +15,15 @@ from app.users.crud import (
     get_pending_friend_requests,
     get_sent_friend_requests,
     get_friendship,
+    upsert_user_public_key,
+    get_active_public_keys_for_user,
 )
 from app.users.schemas import (
     SUserProfile,
     SUserProfileUpdate,
     SFriendRequest,
+    SUserPublicKeyCreate,
+    SUserPublicKeyRead,
 )
 from app.users.dependensies import get_current_user
 from app.users.models import User, FriendshipStatus
@@ -113,6 +117,34 @@ async def update_current_user_avatar(
         "is_online": manager.is_user_online(updated_user.id),
         "last_seen": updated_user.last_seen.isoformat() if updated_user.last_seen else None,
     }
+
+
+@router.post("/me/keys", response_model=SUserPublicKeyRead)
+async def register_my_public_key(
+    key_data: SUserPublicKeyCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    key_row = await upsert_user_public_key(
+        db=db,
+        user_id=user.id,
+        key_id=key_data.key_id,
+        algorithm=key_data.algorithm,
+        public_key=key_data.public_key,
+    )
+    return key_row
+
+
+@router.get("/{user_id}/keys", response_model=list[SUserPublicKeyRead])
+async def list_user_public_keys(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    target_user = await get_one_by_id_or_none(db, user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return await get_active_public_keys_for_user(db, user_id)
 
 
 @router.get("/search/{username}", response_model=SUserProfile)

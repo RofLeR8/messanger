@@ -67,6 +67,13 @@ class Message(Base):
     in_reply_to_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("messages.id"), nullable=True)
     in_reply_to_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
 
+    # E2EE payload fields (ciphertext is always server-stored for encrypted messages)
+    ciphertext: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    nonce: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    aad: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    encryption_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    sender_key_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
     # Relationships
     chat: Mapped["Chat"] = relationship(
         back_populates="messages",
@@ -105,3 +112,16 @@ class Chat(Base):
         back_populates="chat",
         lazy="select"
     )
+
+
+class ChatEncryptedKey(Base):
+    __tablename__ = "chat_encrypted_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(Integer, ForeignKey("chats.id"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    key_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    encrypted_chat_key: Mapped[str] = mapped_column(Text, nullable=False)
+    key_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    chat: Mapped["Chat"] = relationship("Chat", lazy="select")

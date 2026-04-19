@@ -29,6 +29,10 @@ from app.chat.crud import (
     kick_member,
     update_chat_name,
     get_member_role,
+    upsert_chat_encrypted_key,
+    get_chat_encrypted_key_for_user,
+    edit_message_encrypted,
+    delete_chat_encrypted_keys,
 )
 from app.chat.schemas import (
     SMessageCreate,
@@ -40,15 +44,29 @@ from app.chat.schemas import (
     SChatMemberAdd,
     SChatUpdate,
     SChatDetail,
+    SChatEncryptedKeyCreate,
+    SChatEncryptedKeyRead,
 )
 from app.chat.models import MemberRole
 from app.websocket.manager import manager
 from jose import jwt
 from datetime import datetime, timezone
-from app.config import get_auth_data
+from app.config import get_auth_data, is_e2ee_enabled
 from typing import List
 
 router = APIRouter(prefix="/chats", tags=["chat"])
+
+
+def _last_message_encrypted_payload_from_orm(last_message):
+    if not last_message or not last_message.ciphertext:
+        return None
+    return {
+        "ciphertext": last_message.ciphertext,
+        "nonce": last_message.nonce,
+        "aad": last_message.aad,
+        "encryption_version": last_message.encryption_version or "v1",
+        "sender_key_id": last_message.sender_key_id,
+    }
 
 
 async def _verify_user_in_chat(db: AsyncSession, chat_id: int, user_id: int):
@@ -89,12 +107,16 @@ async def get_chats_list(db: AsyncSession = Depends(get_db), user: User = Depend
             created_by=chat.created_by,
             last_message_id=last_message.id if last_message else None,
             last_message_at=last_message.created_at.isoformat() if last_message and last_message.created_at else None,
-            last_message_content=last_message.content if last_message else None,
+            last_message_content=(
+                last_message.content if last_message and last_message.content
+                else ("[Encrypted message]" if last_message and last_message.ciphertext else None)
+            ),
             last_message_sender_id=last_message.sender_id if last_message else None,
             unread_count=unread_count,
             last_message_file_url=last_message.file_url if last_message else None,
             last_message_file_type=last_message.file_type if last_message else None,
             last_message_file_name=last_message.file_name if last_message else None,
+            last_message_encrypted_payload=_last_message_encrypted_payload_from_orm(last_message),
             members_count=members_count,
         )
         result.append(chat_read.model_dump())
@@ -191,10 +213,14 @@ async def get_chat_details(
         created_by=chat.created_by,
         last_message_id=last_message.id if last_message else None,
         last_message_at=last_message.created_at if last_message and last_message.created_at else None,
-        last_message_content=last_message.content if last_message else None,
+        last_message_content=(
+            last_message.content if last_message and last_message.content
+            else ("[Encrypted message]" if last_message and last_message.ciphertext else None)
+        ),
         last_message_sender_id=last_message.sender_id if last_message else None,
         unread_count=unread_count,
         members_count=members_count,
+        last_message_encrypted_payload=_last_message_encrypted_payload_from_orm(last_message),
     )
 
 
@@ -265,6 +291,52 @@ async def get_messages_list(
     return messages
 
 
+@router.get("/{chat_id}/keys/me", response_model=SChatEncryptedKeyRead)
+async def get_my_chat_key(
+    chat_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    current_user_id = user.id
+    await _verify_user_in_chat(db, chat_id, current_user_id)
+    chat_key = await get_chat_encrypted_key_for_user(db, chat_id, current_user_id)
+    if not chat_key:
+        raise HTTPException(status_code=404, detail="No encrypted chat key for this user")
+    return chat_key
+
+
+@router.post("/{chat_id}/keys/{user_id}", response_model=SChatEncryptedKeyRead)
+async def upsert_chat_key_for_member(
+    chat_id: int,
+    user_id: int,
+    key_data: SChatEncryptedKeyCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    current_user_id = user.id
+    chat = await _verify_user_in_chat(db, chat_id, current_user_id)
+
+    if chat.is_group:
+        role = await get_member_role(db, chat_id, current_user_id)
+        if role != MemberRole.admin:
+            raise HTTPException(status_code=403, detail="Only admin can set group chat keys")
+    # Direct chat: any participant may store the AES key wrapped for themselves or their peer
+    # (each user_id row holds ciphertext only that user can open with their device key).
+
+    if not await is_chat_member(db, chat_id, user_id):
+        raise HTTPException(status_code=404, detail="Target user is not chat member")
+
+    chat_key = await upsert_chat_encrypted_key(
+        db=db,
+        chat_id=chat_id,
+        user_id=user_id,
+        key_id=key_data.key_id,
+        encrypted_chat_key=key_data.encrypted_chat_key,
+        key_version=key_data.key_version,
+    )
+    return chat_key
+
+
 @router.post("/{chat_id}/messages", status_code=status.HTTP_201_CREATED)
 async def create_message_in_chat(
     chat_id: int,
@@ -285,17 +357,29 @@ async def create_message_in_chat(
                 recipient_id = m.user_id
                 break
 
+    plaintext_content = (message_data.content or "").strip() if message_data.content else ""
+    encrypted_payload = message_data.encrypted_payload
+    if encrypted_payload and not is_e2ee_enabled():
+        raise HTTPException(status_code=400, detail="E2EE is disabled")
+    if not plaintext_content and not message_data.file_url and not encrypted_payload:
+        raise HTTPException(status_code=400, detail="Message content is empty")
+
     # Create the message
     message_data_result = await create_message(
         db=db,
         sender_id=current_user_id,
         recipient_id=recipient_id,
-        content=message_data.content,
+        content=plaintext_content or None,
         chat_id=chat_id,
         in_reply_to_id=message_data.in_reply_to_id,
         file_url=message_data.file_url,
         file_type=message_data.file_type,
-        file_name=message_data.file_name
+        file_name=message_data.file_name,
+        ciphertext=encrypted_payload.ciphertext if encrypted_payload else None,
+        nonce=encrypted_payload.nonce if encrypted_payload else None,
+        aad=encrypted_payload.aad if encrypted_payload else None,
+        encryption_version=encrypted_payload.encryption_version if encrypted_payload else None,
+        sender_key_id=encrypted_payload.sender_key_id if encrypted_payload else None,
     )
 
     # Get reply-to info for broadcast
@@ -325,8 +409,17 @@ async def create_message_in_chat(
         "created_at": message_data_result["created_at"].isoformat() if message_data_result["created_at"] else None,
         "is_read": False,
         "is_delivered": True,
-        "chat_id": chat_id
+        "chat_id": chat_id,
+        "is_encrypted": bool(message_data_result.get("ciphertext")),
     }
+    if message_data_result.get("ciphertext"):
+        broadcast_data["encrypted_payload"] = {
+            "ciphertext": message_data_result["ciphertext"],
+            "nonce": message_data_result["nonce"],
+            "aad": message_data_result["aad"],
+            "encryption_version": message_data_result["encryption_version"] or "v1",
+            "sender_key_id": message_data_result["sender_key_id"],
+        }
 
     # Add reply info if exists
     if reply_to_info:
@@ -418,7 +511,23 @@ async def edit_message_endpoint(
     current_user_id = user.id
     await _verify_user_in_chat(db, chat_id, current_user_id)
 
-    message = await edit_message(db, message_id, current_user_id, edit_data.content)
+    if edit_data.encrypted_payload:
+        if not is_e2ee_enabled():
+            raise HTTPException(status_code=400, detail="E2EE is disabled")
+        message = await edit_message_encrypted(
+            db,
+            message_id,
+            current_user_id,
+            ciphertext=edit_data.encrypted_payload.ciphertext,
+            nonce=edit_data.encrypted_payload.nonce,
+            aad=edit_data.encrypted_payload.aad,
+            encryption_version=edit_data.encrypted_payload.encryption_version,
+            sender_key_id=edit_data.encrypted_payload.sender_key_id,
+        )
+    elif edit_data.content is not None:
+        message = await edit_message(db, message_id, current_user_id, edit_data.content)
+    else:
+        raise HTTPException(status_code=400, detail="No edit payload")
     if not message:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -431,6 +540,14 @@ async def edit_message_endpoint(
         "message_id": message_id,
         "chat_id": chat_id,
         "content": message.content,
+        "is_encrypted": bool(message.ciphertext),
+        "encrypted_payload": {
+            "ciphertext": message.ciphertext,
+            "nonce": message.nonce,
+            "aad": message.aad,
+            "encryption_version": message.encryption_version or "v1",
+            "sender_key_id": message.sender_key_id,
+        } if message.ciphertext else None,
         "is_edited": True,
         "edited_at": message.edited_at.isoformat() if message.edited_at else None
     }, chat_id)
@@ -534,6 +651,13 @@ async def search_messages_endpoint(
             detail="Search query must be at least 2 characters"
         )
 
+    # Search for encrypted chats is not supported server-side.
+    chat_keys = await get_chat_encrypted_key_for_user(db, chat_id, current_user_id)
+    if chat_keys:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Server-side search is unavailable for encrypted chats"
+        )
     messages = await search_messages(db, chat_id, q, limit=limit, offset=offset)
     return messages
 
@@ -621,12 +745,14 @@ async def add_member_endpoint(
         )
 
     # Broadcast member added
+    await delete_chat_encrypted_keys(db, chat_id)
     await manager.broadcast_to_chat({
         "type": "member_added",
         "chat_id": chat_id,
         "user_id": member_data.user_id,
         "user_name": new_member.name,
         "added_by": current_user_id,
+        "requires_key_rotation": True,
     }, chat_id)
 
     # Send notification to the new member
@@ -666,10 +792,12 @@ async def remove_member_endpoint(
                 detail="Failed to leave the group"
             )
 
+        await delete_chat_encrypted_keys(db, chat_id)
         await manager.broadcast_to_chat({
             "type": "member_left",
             "chat_id": chat_id,
             "user_id": current_user_id,
+            "requires_key_rotation": True,
         }, chat_id)
 
         manager.disconnect_user_from_chat(current_user_id, chat_id)
@@ -695,12 +823,14 @@ async def remove_member_endpoint(
     kicked_user = await get_one_by_id_or_none(db, user_id)
     kicked_user_name = kicked_user.name if kicked_user else None
 
+    await delete_chat_encrypted_keys(db, chat_id)
     await manager.broadcast_to_chat({
         "type": "member_removed",
         "chat_id": chat_id,
         "user_id": user_id,
         "user_name": kicked_user_name,
         "removed_by": current_user_id,
+        "requires_key_rotation": True,
     }, chat_id)
 
     # Disconnect kicked user from chat
@@ -825,13 +955,14 @@ async def websocket_chat_connection(
                 }, chat_id, exclude_user_id=current_user_id)
 
             else:
-                content = data.get("content", "").strip()
+                content = (data.get("content") or "").strip()
                 in_reply_to_id = data.get("in_reply_to_id")
                 file_url = data.get("file_url")
                 file_type = data.get("file_type")
                 file_name = data.get("file_name")
+                encrypted_payload = data.get("encrypted_payload")
 
-                if not content and not file_url:
+                if not content and not file_url and not encrypted_payload:
                     continue
 
                 # Determine recipient for direct chats
@@ -849,7 +980,12 @@ async def websocket_chat_connection(
                     in_reply_to_id=in_reply_to_id,
                     file_url=file_url,
                     file_type=file_type,
-                    file_name=file_name
+                    file_name=file_name,
+                    ciphertext=encrypted_payload.get("ciphertext") if encrypted_payload else None,
+                    nonce=encrypted_payload.get("nonce") if encrypted_payload else None,
+                    aad=encrypted_payload.get("aad") if encrypted_payload else None,
+                    encryption_version=encrypted_payload.get("encryption_version") if encrypted_payload else None,
+                    sender_key_id=encrypted_payload.get("sender_key_id") if encrypted_payload else None,
                 )
 
                 # Get reply-to info for broadcast
@@ -876,8 +1012,17 @@ async def websocket_chat_connection(
                     "created_at": message_data["created_at"].isoformat() if message_data["created_at"] else None,
                     "is_read": False,
                     "is_delivered": True,
-                    "chat_id": chat_id
+                    "chat_id": chat_id,
+                    "is_encrypted": bool(message_data.get("ciphertext")),
                 }
+                if message_data.get("ciphertext"):
+                    broadcast_data["encrypted_payload"] = {
+                        "ciphertext": message_data["ciphertext"],
+                        "nonce": message_data["nonce"],
+                        "aad": message_data["aad"],
+                        "encryption_version": message_data["encryption_version"] or "v1",
+                        "sender_key_id": message_data["sender_key_id"],
+                    }
 
                 if reply_to_info:
                     broadcast_data["in_reply_to_id"] = reply_to_info["id"]
