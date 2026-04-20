@@ -67,3 +67,20 @@ class SFriendWithDetails(BaseModel):
     avatar_url: Optional[str] = None
     is_online: bool = False
     last_seen: Optional[datetime] = None
+
+
+class SUserPublicKeyCreate(BaseModel):
+    key_id: str = Field(..., min_length=1, max_length=128)
+    algorithm: str = Field(default="RSA-OAEP", min_length=1, max_length=64)
+    public_key: str = Field(..., min_length=1)
+
+
+class SUserPublicKeyRead(BaseModel):
+    user_id: int
+    key_id: str
+    algorithm: str
+    public_key: str
+    revoked_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

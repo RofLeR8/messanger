@@ -60,3 +60,16 @@ class Friendship(Base):
     addressee: Mapped["User"] = relationship(
         "User", foreign_keys=[addressee_id], back_populates="friend_requests_received"
     )
+
+
+class UserPublicKey(Base):
+    __tablename__ = "user_public_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    key_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    algorithm: Mapped[str] = mapped_column(String(64), nullable=False, default="RSA-OAEP")
+    public_key: Mapped[str] = mapped_column(Text, nullable=False)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship("User", lazy="select")

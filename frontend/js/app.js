@@ -15,6 +15,7 @@ let isTyping = false;
 let currentChatIsGroup = false; // Track if current chat is a group
 let currentActiveTab = 'chats'; // 'chats' or 'friends'
 let currentFriendsTab = 'all'; // 'all', 'requests', 'search'
+let e2eeEnabled = true;
 
 // Reply state
 let replyingToMessage = null; // { id, sender_id, content, sender_name }
@@ -30,6 +31,7 @@ let searchResults = [];
 let currentSearchIndex = -1;
 let searchNavTimeout = null;
 let searchTimeout = null;
+let selectedUserInfoId = null;
 
 // Context menu state
 let contextMenuTarget = null;
@@ -116,6 +118,17 @@ const profileAvatarDisplay = document.getElementById('profile-avatar-display');
 const avatarUploadInput = document.getElementById('avatar-upload-input');
 const profileSuccess = document.getElementById('profile-success');
 const profileError = document.getElementById('profile-error');
+const userInfoModal = document.getElementById('user-info-modal');
+const closeUserInfoBtn = document.getElementById('close-user-info-btn');
+const userInfoAvatar = document.getElementById('user-info-avatar');
+const userInfoName = document.getElementById('user-info-name');
+const userInfoUsername = document.getElementById('user-info-username');
+const userInfoEmail = document.getElementById('user-info-email');
+const userInfoPhone = document.getElementById('user-info-phone');
+const userInfoBio = document.getElementById('user-info-bio');
+const userInfoStatus = document.getElementById('user-info-status');
+const userInfoChatBtn = document.getElementById('user-info-chat-btn');
+const userInfoFriendBtn = document.getElementById('user-info-friend-btn');
 
 const groupChatModal = document.getElementById('group-chat-modal');
 const groupChatForm = document.getElementById('group-chat-form');
@@ -174,6 +187,163 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function getEncryptedPayloadFromMessage(message) {
+    if (message.encrypted_payload) return message.encrypted_payload;
+    if (message.ciphertext && message.nonce) {
+        return {
+            ciphertext: message.ciphertext,
+            nonce: message.nonce,
+            aad: message.aad || null,
+            encryption_version: message.encryption_version || 'v1',
+            sender_key_id: message.sender_key_id || null,
+        };
+    }
+    return null;
+}
+
+function parseEncryptedAad(payload) {
+    if (!payload?.aad) return null;
+    try {
+        return JSON.parse(atob(payload.aad));
+    } catch (_) {
+        return null;
+    }
+}
+
+async function prepareChatKeyIfNeeded(chatId) {
+    if (!e2eeEnabled || !window.E2EE || !authToken || !currentUserId) return;
+    try {
+        const members = await getChatMembers(chatId);
+        await window.E2EE.ensureChatKey(chatId, members, currentUserId, authToken);
+    } catch (error) {
+        console.warn('E2EE key setup skipped:', error);
+    }
+}
+
+async function decryptMessageContentIfNeeded(message) {
+    const payload = getEncryptedPayloadFromMessage(message);
+    if (!payload || !window.E2EE) return message.content || '';
+    try {
+        const decrypted = await window.E2EE.decryptPayload(message.chat_id || currentChatId, payload);
+        if (decrypted == null) return message.content || '';
+        // File-only messages: ciphertext decrypts to empty string — not an error
+        if (decrypted === '' && message.file_url) return '';
+        if (decrypted === '') return '';
+        return decrypted;
+    } catch (error) {
+        return message.file_url ? '' : '[Encrypted message]';
+    }
+}
+
+function formatChatListPreviewLine(chat) {
+    let inner = chat._preview_inner;
+    if (inner == null || inner === '') {
+        inner = chat.last_message_content || '';
+    }
+    if (inner === '[Encrypted message]') inner = '';
+    if (chat.last_message_file_url) {
+        const isImage = chat._preview_file_is_image ?? (chat.last_message_file_type === 'image');
+        const name = chat._preview_file_label || chat.last_message_file_name || (isImage ? 'Image' : 'File');
+        const prefix = isImage ? '📷' : '📎';
+        return inner ? `${prefix} ${name}: ${inner}` : `${prefix} ${name}`;
+    }
+    return inner;
+}
+
+async function decorateChatListPreviews(chats) {
+    for (const chat of chats) {
+        chat._preview_inner = null;
+        chat._preview_file_label = undefined;
+        chat._preview_file_is_image = undefined;
+
+        const aadEarly = chat.last_message_encrypted_payload
+            ? parseEncryptedAad(chat.last_message_encrypted_payload)
+            : null;
+        if (aadEarly?.original_name) chat._preview_file_label = aadEarly.original_name;
+        if (aadEarly?.original_type?.toLowerCase().startsWith('image/')) chat._preview_file_is_image = true;
+
+        if (!chat.last_message_encrypted_payload || !e2eeEnabled || !window.E2EE) {
+            const raw = chat.last_message_content || '';
+            chat._preview_inner = raw === '[Encrypted message]' ? '' : raw;
+            continue;
+        }
+        await prepareChatKeyIfNeeded(chat.id);
+        if (!window.E2EE.loadChatKey(chat.id)) {
+            chat._preview_inner = '';
+            continue;
+        }
+        try {
+            const msg = {
+                chat_id: chat.id,
+                encrypted_payload: chat.last_message_encrypted_payload,
+                content: chat.last_message_content,
+                file_url: chat.last_message_file_url,
+            };
+            let inner = await decryptMessageContentIfNeeded(msg);
+            if (inner === '[Encrypted message]') inner = '';
+            if ((!inner || !String(inner).trim()) && chat.last_message_file_url) {
+                const aad = parseEncryptedAad(chat.last_message_encrypted_payload);
+                if (aad?.file_nonce) inner = '';
+            }
+            chat._preview_inner = inner || '';
+        } catch (_) {
+            chat._preview_inner = '';
+        }
+    }
+}
+
+async function downloadAndDecryptAttachment(fileUrl, fileNonce, originalName, originalType) {
+    if (!window.E2EE || !fileNonce) {
+        window.open(fileUrl, '_blank');
+        return;
+    }
+    try {
+        const response = await fetch(fileUrl, { headers: { Authorization: `Bearer ${authToken}` } });
+        const encryptedBuffer = await response.arrayBuffer();
+        const plainBuffer = await window.E2EE.decryptFile(currentChatId, encryptedBuffer, fileNonce);
+        const blob = new Blob([plainBuffer], { type: originalType || 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = originalName || 'decrypted-file';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        alert('Failed to decrypt attachment');
+    }
+}
+
+async function hydrateEncryptedImagePreviews(messageDiv, message) {
+    const wrap = messageDiv.querySelector('.message-attachment-encrypted-image');
+    if (!wrap || !window.E2EE?.decryptFile || !message?.file_url) return;
+    const nonce = wrap.dataset.fileNonce;
+    const url = wrap.dataset.fileUrl;
+    if (!nonce || !url) return;
+    const chatId = message.chat_id || currentChatId;
+    try {
+        const response = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
+        const encryptedBuffer = await response.arrayBuffer();
+        const plain = await window.E2EE.decryptFile(chatId, encryptedBuffer, nonce);
+        const mime = wrap.dataset.fileType || 'image/jpeg';
+        const blob = new Blob([plain], { type: mime });
+        const src = URL.createObjectURL(blob);
+        wrap.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = src;
+        img.alt = wrap.dataset.fileName || 'Image';
+        img.className = 'message-attachment-img';
+        img.addEventListener('click', (e) => {
+            e.stopPropagation();
+            window.open(src, '_blank');
+        });
+        wrap.appendChild(img);
+    } catch (_) {
+        wrap.innerHTML = '<div class="encrypted-media-fallback">Image</div>';
+    }
+}
+
 let currentChatOffset = 0; // Track pagination offset for message history
 
 // Infinite scroll: load older messages when scrolling to top
@@ -194,7 +364,7 @@ function handleScroll() {
 }
 
 async function loadMoreMessages() {
-    if (!currentChatId || isLoadingMore) return;
+    if (!currentChatId || isLoadingMore) return false;
     isLoadingMore = true;
 
     try {
@@ -209,7 +379,7 @@ async function loadMoreMessages() {
         const messages = await response.json();
         if (messages.length === 0) {
             // No more messages
-            return;
+            return false;
         }
 
         currentChatOffset += messages.length;
@@ -217,10 +387,13 @@ async function loadMoreMessages() {
         // Prepend older messages (they come in reverse order, so reverse back)
         const fragment = document.createDocumentFragment();
         const reversedMessages = [...messages].reverse();
-        reversedMessages.forEach(msg => {
+        for (const msg of reversedMessages) {
+            msg.display_content = await decryptMessageContentIfNeeded(msg);
             const isSent = msg.sender_id === currentUserId;
-            fragment.appendChild(createMessageElement(msg, isSent));
-        });
+            const el = createMessageElement(msg, isSent);
+            fragment.appendChild(el);
+            void hydrateEncryptedImagePreviews(el, msg);
+        }
 
         // Insert at the beginning
         if (messagesContainer.firstChild) {
@@ -232,9 +405,11 @@ async function loadMoreMessages() {
         // Restore scroll position
         const newScrollHeight = messagesContainer.scrollHeight;
         messagesContainer.scrollTop = newScrollHeight - oldScrollHeight;
+        return true;
 
     } catch (error) {
         console.error('Error loading more messages:', error);
+        return false;
     } finally {
         isLoadingMore = false;
     }
@@ -252,11 +427,29 @@ function scrollToBottom() {
 function scrollToMessage(messageId) {
     const messageEl = document.querySelector(`.message[data-message-id="${messageId}"]`);
     if (messageEl) {
-        messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Avoid viewport scroll on mobile: scroll only inside messages container.
+        const targetTop = messageEl.offsetTop - (messagesContainer.clientHeight / 2) + (messageEl.offsetHeight / 2);
+        messagesContainer.scrollTo({
+            top: Math.max(0, targetTop),
+            behavior: 'smooth',
+        });
         messageEl.style.transition = 'background 0.3s ease';
         messageEl.style.background = 'rgba(0, 217, 255, 0.3)';
         setTimeout(() => { messageEl.style.background = ''; }, 2000);
+        return true;
     }
+    return false;
+}
+
+async function ensureMessageLoadedAndScroll(messageId) {
+    if (scrollToMessage(messageId)) return true;
+    // Load older history chunks until message appears or history ends.
+    for (let i = 0; i < 40; i++) {
+        const loadedAny = await loadMoreMessages();
+        if (!loadedAny) break;
+        if (scrollToMessage(messageId)) return true;
+    }
+    return false;
 }
 
 function getUserDisplayName(userId) {
@@ -273,20 +466,103 @@ function getUserInitials(userId) {
 function getUserAvatarHtml(userId, size = '42') {
     const user = usersCache[userId] || {};
     const initials = getUserInitials(userId);
+    const clickableClass = userId ? ' user-clickable' : '';
+    const clickableAttrs = userId ? `data-user-id="${userId}" role="button" tabindex="0"` : '';
     if (user.avatar_url) {
-        return `<div class="chat-item-avatar"><img src="${escapeHtml(user.avatar_url)}" alt="Avatar">
+        return `<div class="chat-item-avatar${clickableClass}" ${clickableAttrs}><img src="${escapeHtml(user.avatar_url)}" alt="Avatar">
             <span class="avatar-status-dot ${user.is_online ? 'online' : ''}"></span></div>`;
     }
-    return `<div class="chat-item-avatar">${initials}
+    return `<div class="chat-item-avatar${clickableClass}" ${clickableAttrs}>${initials}
         <span class="avatar-status-dot ${user.is_online ? 'online' : ''}"></span></div>`;
 }
 
-function getFriendAvatarHtml(user, sizeClass = 'friend-avatar') {
+function getFriendAvatarHtml(user, sizeClass = 'friend-avatar', userId = null) {
+    const targetUserId = userId || user.user_id || user.id || null;
+    const clickableClass = targetUserId ? ' user-clickable' : '';
+    const clickableAttrs = targetUserId ? `data-user-id="${targetUserId}" role="button" tabindex="0"` : '';
     if (user.avatar_url) {
-        return `<div class="${sizeClass}"><img src="${escapeHtml(user.avatar_url)}" alt="Avatar"></div>`;
+        return `<div class="${sizeClass}${clickableClass}" ${clickableAttrs}><img src="${escapeHtml(user.avatar_url)}" alt="Avatar"></div>`;
     }
     const initials = (user.name || 'U').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
-    return `<div class="${sizeClass}">${initials}</div>`;
+    return `<div class="${sizeClass}${clickableClass}" ${clickableAttrs}>${initials}</div>`;
+}
+
+async function getUserInfoById(userId) {
+    const response = await fetch(`${API_BASE_URL}/users/${userId}`, {
+        headers: { 'Authorization': `Bearer ${authToken}` },
+    });
+    if (!response.ok) throw new Error('Failed to load user info');
+    return await response.json();
+}
+
+function renderUserInfoModal(user) {
+    const userName = user.name || user.email?.split('@')[0] || 'Unknown user';
+    if (user.avatar_url) {
+        userInfoAvatar.innerHTML = `<img src="${escapeHtml(user.avatar_url)}" alt="Avatar">`;
+    } else {
+        const initials = userName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+        userInfoAvatar.innerHTML = initials;
+    }
+    userInfoName.textContent = userName;
+    userInfoUsername.textContent = user.username ? `@${user.username}` : '—';
+    userInfoEmail.textContent = user.email || '—';
+    userInfoPhone.textContent = user.phone || '—';
+    userInfoBio.textContent = user.bio || '—';
+    userInfoStatus.textContent = user.is_online ? 'Online' : (user.last_seen ? `Last seen ${formatLastSeen(user.last_seen)}` : 'Offline');
+}
+
+async function openUserInfoModal(userId) {
+    if (!userId || !authToken) return;
+    selectedUserInfoId = userId;
+    try {
+        const userInfo = await getUserInfoById(userId);
+        usersCache[userId] = { ...(usersCache[userId] || {}), ...userInfo };
+        renderUserInfoModal(usersCache[userId]);
+        updateUserInfoActions(userId);
+        showElement(userInfoModal);
+    } catch (error) {
+        const fallbackUser = usersCache[userId];
+        if (!fallbackUser) {
+            alert('Failed to load user info');
+            return;
+        }
+        renderUserInfoModal(fallbackUser);
+        updateUserInfoActions(userId);
+        showElement(userInfoModal);
+    }
+}
+
+function closeUserInfoModal() {
+    hideElement(userInfoModal);
+    selectedUserInfoId = null;
+}
+
+function updateUserInfoActions(userId) {
+    if (!userInfoChatBtn || !userInfoFriendBtn) return;
+    const isSelf = userId === currentUserId;
+    const isFriend = friendsCache.some(f => f.user_id === userId);
+    const sentPending = pendingRequestsCache.some(r => r.addressee_id === userId);
+    const hasIncoming = pendingRequestsCache.some(r => r.requester_id === userId);
+
+    userInfoChatBtn.disabled = isSelf;
+    userInfoChatBtn.textContent = isSelf ? 'This is you' : 'Start chat';
+
+    if (isSelf) {
+        userInfoFriendBtn.disabled = true;
+        userInfoFriendBtn.textContent = 'This is you';
+    } else if (isFriend) {
+        userInfoFriendBtn.disabled = true;
+        userInfoFriendBtn.textContent = 'Friends';
+    } else if (sentPending) {
+        userInfoFriendBtn.disabled = true;
+        userInfoFriendBtn.textContent = 'Request sent';
+    } else if (hasIncoming) {
+        userInfoFriendBtn.disabled = true;
+        userInfoFriendBtn.textContent = 'Incoming request';
+    } else {
+        userInfoFriendBtn.disabled = false;
+        userInfoFriendBtn.textContent = 'Add friend';
+    }
 }
 
 // ==================== Page Navigation ====================
@@ -310,6 +586,7 @@ function navigateToChats() {
 async function refreshChats() {
     try {
         const chats = await getChats();
+        await decorateChatListPreviews(chats);
         updateChatsList(chats, false); // false = no animation
     } catch (error) {
         console.error('Error refreshing chats:', error);
@@ -350,19 +627,12 @@ function updateChatsList(chats, animate = true) {
                 unreadBadge.remove();
             }
 
-            const lastMessage = chat.last_message_content;
             const lastMessageTime = chat.last_message_at ? formatTime(chat.last_message_at) : '';
             const lastMessageEl = chatItem.querySelector('.chat-item-last-message');
             const timeEl = chatItem.querySelector('.chat-item-time');
 
-            let messagePreview = lastMessage || '';
-            if (chat.last_message_file_url) {
-                const prefix = chat.last_message_file_type === 'image' ? '📷' : '📎';
-                const name = chat.last_message_file_name || (chat.last_message_file_type === 'image' ? 'Image' : 'File');
-                messagePreview = messagePreview ? `${prefix} ${name}: ${messagePreview}` : `${prefix} ${name}`;
-            }
-
-            if (lastMessageEl && messagePreview) lastMessageEl.textContent = messagePreview;
+            const messagePreview = formatChatListPreviewLine(chat);
+            if (lastMessageEl) lastMessageEl.textContent = messagePreview;
             if (timeEl && lastMessageTime) timeEl.textContent = lastMessageTime;
         });
     }
@@ -379,15 +649,27 @@ function navigateToChat(chatId, chatName, isGroup) {
     if (isGroup) {
         chatHeaderStatus.innerHTML = '';
         chatHeaderStatus.classList.remove('online');
-        if (chatHeaderAvatar) chatHeaderAvatar.classList.add('hidden');
+        if (chatHeaderAvatar) {
+            chatHeaderAvatar.classList.add('hidden');
+            chatHeaderAvatar.removeAttribute('data-user-id');
+            chatHeaderAvatar.classList.remove('user-clickable');
+        }
+        chatTitle.classList.remove('user-clickable');
+        chatTitle.removeAttribute('data-user-id');
     } else {
         // For direct chats, show loading then update with actual status
         chatHeaderStatus.innerHTML = '<span class="offline-dot"></span> Loading...';
-        if (chatHeaderAvatar) chatHeaderAvatar.classList.add('hidden');
+        if (chatHeaderAvatar) {
+            chatHeaderAvatar.classList.add('hidden');
+            chatHeaderAvatar.classList.add('user-clickable');
+        }
         // Load the other user's status from chat members
         getChatMembers(chatId).then(members => {
             const otherMember = members.find(m => m.user_id !== currentUserId);
             if (otherMember) {
+                if (chatHeaderAvatar) chatHeaderAvatar.dataset.userId = String(otherMember.user_id);
+                chatTitle.classList.add('user-clickable');
+                chatTitle.dataset.userId = String(otherMember.user_id);
                 // Cache the user info with avatar
                 usersCache[otherMember.user_id] = {
                     name: otherMember.user_name || otherMember.user_email?.split('@')[0],
@@ -403,6 +685,8 @@ function navigateToChat(chatId, chatName, isGroup) {
         }).catch(() => {
             chatHeaderStatus.innerHTML = '';
             if (chatHeaderAvatar) chatHeaderAvatar.classList.add('hidden');
+            chatTitle.classList.remove('user-clickable');
+            chatTitle.removeAttribute('data-user-id');
         });
     }
 
@@ -420,6 +704,7 @@ function navigateToChat(chatId, chatName, isGroup) {
     chatPage.classList.remove('inactive');
 
     hideElement(groupMembersPanel);
+    prepareChatKeyIfNeeded(chatId);
     loadMessages(chatId);
     connectWebSocket(chatId);
     stopNotificationCheck();
@@ -429,6 +714,18 @@ function stopNotificationCheck() {}
 
 // ==================== Tab Switching ====================
 function switchToTab(tab) {
+    // If user switches tabs while viewing a specific chat, close chat detail view first.
+    if (chatPage.classList.contains('active')) {
+        currentChatId = null;
+        currentChatIsGroup = false;
+        currentChatMembers = [];
+        if (websocket) { websocket.close(); websocket = null; }
+        hideElement(groupMembersPanel);
+        chatPage.classList.remove('active');
+        chatPage.classList.add('inactive');
+        document.querySelectorAll('.chat-item').forEach(item => item.classList.remove('active'));
+    }
+
     currentActiveTab = tab;
     tabChats.classList.toggle('active', tab === 'chats');
     tabFriends.classList.toggle('active', tab === 'friends');
@@ -496,11 +793,11 @@ function renderFriendsList(friends) {
         item.innerHTML = `
             ${getFriendAvatarHtml(friend)}
             <div class="friend-info">
-                <div class="friend-name">
+                <div class="friend-name user-clickable" data-user-id="${friend.user_id}" role="button" tabindex="0">
                     ${friend.is_online ? '<span class="status-dot online"></span>' : ''}
                     ${escapeHtml(friend.name)}
                 </div>
-                ${friend.username ? `<div class="friend-username">@${escapeHtml(friend.username)}</div>` : ''}
+                ${friend.username ? `<div class="friend-username user-clickable" data-user-id="${friend.user_id}" role="button" tabindex="0">@${escapeHtml(friend.username)}</div>` : ''}
             </div>
             <div class="friend-actions">
                 <button class="btn-chat" data-friend-id="${friend.user_id}" title="Start chat">
@@ -573,10 +870,10 @@ function renderPendingRequests(requests) {
         };
 
         item.innerHTML = `
-            ${getFriendAvatarHtml(requester)}
+            ${getFriendAvatarHtml(requester, 'friend-avatar', req.requester_id)}
             <div class="pending-request-info">
-                <div class="pending-request-name">${escapeHtml(req.requester_name)}</div>
-                ${req.requester_username ? `<div class="pending-request-username">@${escapeHtml(req.requester_username)}</div>` : ''}
+                <div class="pending-request-name user-clickable" data-user-id="${req.requester_id}" role="button" tabindex="0">${escapeHtml(req.requester_name)}</div>
+                ${req.requester_username ? `<div class="pending-request-username user-clickable" data-user-id="${req.requester_id}" role="button" tabindex="0">@${escapeHtml(req.requester_username)}</div>` : ''}
             </div>
             <div class="pending-request-actions">
                 <button class="btn-accept" data-requester-id="${req.requester_id}">Accept</button>
@@ -649,8 +946,8 @@ async function searchUserAndRender() {
     item.innerHTML = `
         ${getFriendAvatarHtml(user)}
         <div class="search-user-info">
-            <div class="search-user-name">${escapeHtml(user.name)}</div>
-            <div class="search-user-handle">${user.username ? '@' + escapeHtml(user.username) : escapeHtml(user.email)}</div>
+            <div class="search-user-name user-clickable" data-user-id="${user.id}" role="button" tabindex="0">${escapeHtml(user.name)}</div>
+            <div class="search-user-handle user-clickable" data-user-id="${user.id}" role="button" tabindex="0">${user.username ? '@' + escapeHtml(user.username) : escapeHtml(user.email)}</div>
         </div>
         ${!isFriend && !requestSent ? `<button class="btn-add-friend" data-user-id="${user.id}">Add Friend</button>` :
           requestSent ? '<button class="btn-add-friend" disabled>Pending</button>' :
@@ -984,7 +1281,7 @@ function handleWsMessage(data) {
                 if (currentChatId === data.chat_id) markMessagesAsRead(data.chat_id);
             }
             addMessageToUI(data, data.sender_id === currentUserId);
-            updateChatLastMessage(data.chat_id, data);
+            void updateChatLastMessage(data.chat_id, data);
             break;
 
         case 'typing':
@@ -1001,9 +1298,17 @@ function handleWsMessage(data) {
 
         case 'message_edited':
             const msgEl = document.querySelector(`.message[data-message-id="${data.message_id}"]`);
-            if (msgEl && data.content) {
+            if (msgEl) {
                 const contentEl = msgEl.querySelector('.message-content');
-                if (contentEl) contentEl.textContent = data.content;
+                if (contentEl) {
+                    if (data.encrypted_payload && window.E2EE) {
+                        window.E2EE.decryptPayload(currentChatId, data.encrypted_payload)
+                            .then(decrypted => { contentEl.textContent = decrypted || ''; })
+                            .catch(() => { contentEl.textContent = ''; });
+                    } else {
+                        contentEl.textContent = data.content || '';
+                    }
+                }
                 let editedEl = msgEl.querySelector('.message-edited');
                 if (!editedEl) {
                     const metaEl = msgEl.querySelector('.message-meta');
@@ -1090,7 +1395,7 @@ function connectNotificationWebSocket() {
                         refreshChats();
                     } else if (data.chat_id !== currentChatId) {
                         updateChatUnreadCount(data.chat_id, 1);
-                        updateChatLastMessage(data.chat_id, data);
+                        void updateChatLastMessage(data.chat_id, data);
                     }
                 }
                 break;
@@ -1182,11 +1487,13 @@ function renderChats(chats, animate = true) {
 
         // Determine display name and avatar
         let chatName, subtitle, avatarHtml;
+        let nameHtml = '';
         if (chat.is_group) {
             chatName = chat.name || 'Group Chat';
             chatNamesCache[chat.id] = chatName;
             subtitle = `${chat.members_count || 0} members`;
             avatarHtml = `<div class="chat-item-avatar">👥</div>`;
+            nameHtml = `<div class="chat-item-name">${escapeHtml(chatName)}</div>`;
         } else {
             chatName = chatNamesCache[chat.id];
             if (!chatName) {
@@ -1196,20 +1503,13 @@ function renderChats(chats, animate = true) {
             subtitle = '';
             const otherId = chatOtherUserId[chat.id];
             avatarHtml = getUserAvatarHtml(otherId);
+            nameHtml = `<div class="chat-item-name user-clickable" data-user-id="${otherId}" role="button" tabindex="0">${escapeHtml(chatName)}</div>`;
         }
 
-        const lastMessage = chat.last_message_content || '';
         const lastMessageTime = chat.last_message_at ? formatTime(chat.last_message_at) : '';
         const unreadCount = chat.unread_count || 0;
 
-        let lastMessagePreview = '';
-        if (chat.last_message_file_url) {
-            const prefix = chat.last_message_file_type === 'image' ? '📷' : '📎';
-            const name = chat.last_message_file_name || (chat.last_message_file_type === 'image' ? 'Image' : 'File');
-            lastMessagePreview = lastMessage ? `${prefix} ${name}: ${lastMessage}` : `${prefix} ${name}`;
-        } else {
-            lastMessagePreview = lastMessage;
-        }
+        const lastMessagePreview = formatChatListPreviewLine(chat);
 
         chatItem.innerHTML = `
             <div class="chat-item-content">
@@ -1217,7 +1517,7 @@ function renderChats(chats, animate = true) {
                     <div class="chat-item-content-with-avatar">
                         ${avatarHtml}
                         <div>
-                            <div class="chat-item-name">${escapeHtml(chatName)}</div>
+                            ${nameHtml}
                             ${subtitle ? `<div style="font-size:0.7rem;color:var(--text-secondary);">${escapeHtml(subtitle)}</div>` : ''}
                         </div>
                     </div>
@@ -1248,13 +1548,26 @@ function getChatDisplayName(chat) {
     return chat.name || 'Direct Chat';
 }
 
-function updateChatLastMessage(chatId, messageData) {
+async function updateChatLastMessage(chatId, messageData) {
     const chatItem = document.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
     if (!chatItem) return;
     const lastMessageEl = chatItem.querySelector('.chat-item-last-message');
     const timeEl = chatItem.querySelector('.chat-item-time');
 
-    let messagePreview = messageData.content || '';
+    let inner = messageData.content || '';
+    if (e2eeEnabled && window.E2EE?.loadChatKey(chatId) && (messageData.encrypted_payload || messageData.ciphertext)) {
+        const msg = { ...messageData, chat_id: chatId };
+        let d = await decryptMessageContentIfNeeded(msg);
+        if (d === '[Encrypted message]') d = '';
+        inner = d || '';
+        if ((!inner || !String(inner).trim()) && messageData.file_url) {
+            const pl = getEncryptedPayloadFromMessage(messageData);
+            const aad = parseEncryptedAad(pl);
+            if (aad?.file_nonce) inner = '';
+        }
+    }
+
+    let messagePreview = inner;
     if (messageData.file_url) {
         const prefix = messageData.file_type === 'image' ? '📷' : '📎';
         const name = messageData.file_name || (messageData.file_type === 'image' ? 'Image' : 'File');
@@ -1288,25 +1601,27 @@ function clearChatUnreadCount(chatId) {
 }
 
 // ==================== Messages Rendering ====================
-function loadMessages(chatId) {
+async function loadMessages(chatId) {
     // Reset infinite scroll state
     resetInfiniteScroll();
 
-    getMessages(chatId)
-        .then(messages => {
-            messagesContainer.innerHTML = '';
-            const fragment = document.createDocumentFragment();
-            messages.forEach(msg => {
-                const isSent = msg.sender_id === currentUserId;
-                fragment.appendChild(createMessageElement(msg, isSent));
-            });
-            messagesContainer.appendChild(fragment);
-            scrollToBottom();
-
-            // Initialize infinite scroll after messages are loaded
-            initInfiniteScroll();
-        })
-        .catch(error => { console.error('Error loading messages:', error); });
+    try {
+        const messages = await getMessages(chatId);
+        messagesContainer.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+        for (const msg of messages) {
+            msg.display_content = await decryptMessageContentIfNeeded(msg);
+            const isSent = msg.sender_id === currentUserId;
+            const el = createMessageElement(msg, isSent);
+            fragment.appendChild(el);
+            void hydrateEncryptedImagePreviews(el, msg);
+        }
+        messagesContainer.appendChild(fragment);
+        scrollToBottom();
+        initInfiniteScroll();
+    } catch (error) {
+        console.error('Error loading messages:', error);
+    }
 }
 
 function createMessageElement(message, isSent) {
@@ -1342,13 +1657,13 @@ function createMessageElement(message, isSent) {
     // Sender avatar + name for received messages (direct & group)
     if (!isSent) {
         html += `<div class="message-sender-row">
-            <div class="message-avatar">${avatarHtml}</div>
-            ${currentChatIsGroup ? `<div class="message-sender-name">${escapeHtml(getUserDisplayName(senderId))}</div>` : ''}
+            <div class="message-avatar user-clickable" data-user-id="${senderId}" role="button" tabindex="0">${avatarHtml}</div>
+            ${currentChatIsGroup ? `<div class="message-sender-name user-clickable" data-user-id="${senderId}" role="button" tabindex="0">${escapeHtml(getUserDisplayName(senderId))}</div>` : ''}
         </div>`;
     } else if (isSent) {
         html += `<div class="message-sender-row message-sender-row-sent">
-            ${currentChatIsGroup ? `<div class="message-sender-name">${escapeHtml(getUserDisplayName(senderId))}</div>` : ''}
-            <div class="message-avatar">${avatarHtml}</div>
+            ${currentChatIsGroup ? `<div class="message-sender-name user-clickable" data-user-id="${senderId}" role="button" tabindex="0">${escapeHtml(getUserDisplayName(senderId))}</div>` : ''}
+            <div class="message-avatar user-clickable" data-user-id="${senderId}" role="button" tabindex="0">${avatarHtml}</div>
         </div>`;
     }
 
@@ -1362,7 +1677,30 @@ function createMessageElement(message, isSent) {
 
     // Attachment
     if (message.file_url) {
-        if (message.file_type === 'image') {
+        const payload = getEncryptedPayloadFromMessage(message);
+        const aadMeta = parseEncryptedAad(payload);
+        const isEncryptedFile = Boolean(aadMeta?.file_nonce);
+        if (isEncryptedFile) {
+            const safeName = escapeHtml(aadMeta.original_name || message.file_name || 'File');
+            const mime = (aadMeta.original_type || '').toLowerCase();
+            const isEncImage = mime.startsWith('image/');
+            if (isEncImage) {
+                html += `<div class="message-attachment message-attachment-encrypted-image"
+                    data-file-url="${escapeHtml(message.file_url)}"
+                    data-file-nonce="${escapeHtml(aadMeta.file_nonce)}"
+                    data-file-name="${safeName}"
+                    data-file-type="${escapeHtml(aadMeta.original_type || 'image/jpeg')}">
+                    <div class="encrypted-media-placeholder"></div></div>`;
+            } else {
+                html += `<div class="message-attachment message-attachment-file message-attachment-encrypted"
+                data-file-url="${escapeHtml(message.file_url)}"
+                data-file-nonce="${escapeHtml(aadMeta.file_nonce)}"
+                data-file-name="${safeName}"
+                data-file-type="${escapeHtml(aadMeta.original_type || 'application/octet-stream')}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <div class="message-attachment-file-info"><div class="message-attachment-file-name">${safeName}</div><div class="message-attachment-file-size">Click to download</div></div></div>`;
+            }
+        } else if (message.file_type === 'image') {
             html += `<div class="message-attachment"><img src="${message.file_url}" alt="${escapeHtml(message.file_name||'Image')}" onclick="window.open('${message.file_url}','_blank')"></div>`;
         } else {
             html += `<div class="message-attachment message-attachment-file" onclick="window.open('${message.file_url}','_blank')">
@@ -1371,8 +1709,11 @@ function createMessageElement(message, isSent) {
         }
     }
 
+    const rawText = (message.display_content ?? message.content ?? '').trim();
+    const showText = rawText.length > 0 && rawText !== '[Encrypted message]';
+
     // Content and meta
-    html += `<div class="message-content">${escapeHtml(message.content || '')}</div>
+    html += `${showText ? `<div class="message-content">${escapeHtml(rawText)}</div>` : ''}
         <div class="message-meta">
             <span class="message-time">${formatTime(message.created_at)}</span>
             ${message.is_edited ? '<span class="message-edited">(edited)</span>' : ''}
@@ -1386,6 +1727,18 @@ function createMessageElement(message, isSent) {
     if (replyQuote) {
         replyQuote.addEventListener('click', (e) => { e.stopPropagation(); scrollToMessage(parseInt(replyQuote.dataset.replyToId)); });
     }
+    const encryptedAttachment = messageDiv.querySelector('.message-attachment-encrypted:not(.message-attachment-encrypted-image)');
+    if (encryptedAttachment) {
+        encryptedAttachment.addEventListener('click', (e) => {
+            e.stopPropagation();
+            downloadAndDecryptAttachment(
+                encryptedAttachment.dataset.fileUrl,
+                encryptedAttachment.dataset.fileNonce,
+                encryptedAttachment.dataset.fileName,
+                encryptedAttachment.dataset.fileType,
+            );
+        });
+    }
 
     return messageDiv;
 }
@@ -1396,10 +1749,12 @@ function getMessageStatusIcon(message) {
     return '<span class="message-status sent" title="Sent">✓</span>';
 }
 
-function addMessageToUI(message, isSent) {
+async function addMessageToUI(message, isSent) {
     const existing = document.querySelector(`.message[data-message-id="${message.id}"]`);
     if (existing) return;
+    message.display_content = await decryptMessageContentIfNeeded(message);
     const messageDiv = createMessageElement(message, isSent);
+    void hydrateEncryptedImagePreviews(messageDiv, message);
     messageDiv.style.animation = 'messageSlideIn 0.3s ease backwards';
     messagesContainer.appendChild(messageDiv);
     scrollToBottom();
@@ -1478,6 +1833,8 @@ function updateUserOnlineStatus(userId) {
             chatHeaderAvatar.innerHTML = initials;
         }
         chatHeaderAvatar.classList.remove('hidden');
+        chatHeaderAvatar.classList.add('user-clickable');
+        chatHeaderAvatar.dataset.userId = String(userId);
     }
 
     // Update header status
@@ -1498,20 +1855,24 @@ function showAuthSection() { showElement(authSection); hideElement(chatSection);
 // ==================== Load Chats & Users ====================
 async function loadChats() {
     try {
-        const currentUser = await getCurrentUserInfo();
-        if (currentUser) {
-            currentUserId = currentUser.id;
-            usersCache[currentUserId] = {
-                name: currentUser.name,
-                email: currentUser.email,
-                username: currentUser.username,
-                phone: currentUser.phone,
-                bio: currentUser.bio,
-                avatar_url: currentUser.avatar_url,
-                is_online: currentUser.is_online,
-                last_seen: currentUser.last_seen
-            };
+        if (e2eeEnabled && window.E2EE && authToken) {
+            await window.E2EE.uploadMyPublicKey(authToken);
         }
+        const currentUser = await getCurrentUserInfo();
+        if (!currentUser) {
+            throw new Error('Could not load current user profile');
+        }
+        currentUserId = currentUser.id;
+        usersCache[currentUserId] = {
+            name: currentUser.name,
+            email: currentUser.email,
+            username: currentUser.username,
+            phone: currentUser.phone,
+            bio: currentUser.bio,
+            avatar_url: currentUser.avatar_url,
+            is_online: currentUser.is_online,
+            last_seen: currentUser.last_seen
+        };
         await loadUsers();
         const chats = await getChats();
 
@@ -1546,6 +1907,7 @@ async function loadChats() {
             }
         }
 
+        await decorateChatListPreviews(chats);
         renderChats(chats, true);
     } catch (error) {
         console.error('Error loading chats:', error);
@@ -1604,7 +1966,23 @@ function hideContextMenu() {
     contextChatId = null;
 }
 
-document.addEventListener('click', (e) => { if (contextMenu && !e.target.closest('#context-menu')) hideContextMenu(); });
+document.addEventListener('click', (e) => {
+    const userTarget = e.target.closest('.user-clickable');
+    if (userTarget && userTarget.dataset.userId) {
+        e.preventDefault();
+        e.stopPropagation();
+        openUserInfoModal(parseInt(userTarget.dataset.userId));
+        return;
+    }
+    if (contextMenu && !e.target.closest('#context-menu')) hideContextMenu();
+});
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const userTarget = e.target.closest('.user-clickable');
+    if (!userTarget || !userTarget.dataset.userId) return;
+    e.preventDefault();
+    openUserInfoModal(parseInt(userTarget.dataset.userId));
+});
 document.addEventListener('contextmenu', (e) => { if (e.target.closest('.message')) { e.preventDefault(); return false; } }, { passive: false });
 
 contextMenu.addEventListener('click', async (e) => {
@@ -1684,15 +2062,20 @@ function cancelEditing() {
 
 async function sendMessageEdit(messageId, newContent) {
     try {
+        const payload = { content: newContent };
+        if (e2eeEnabled && window.E2EE?.loadChatKey(currentChatId)) {
+            payload.encrypted_payload = await window.E2EE.encryptText(currentChatId, newContent || '');
+            payload.content = null;
+        }
         const response = await fetch(`${API_BASE_URL}/chats/${currentChatId}/messages/${messageId}/edit`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-            body: JSON.stringify({ content: newContent }),
+            body: JSON.stringify(payload),
         });
         if (!response.ok) throw new Error((await response.json()).detail || 'Failed to edit message');
         const messageEl = document.querySelector(`.message[data-message-id="${messageId}"]`);
         if (messageEl) {
             const contentEl = messageEl.querySelector('.message-content');
-            if (contentEl) contentEl.textContent = newContent;
+            if (contentEl) contentEl.textContent = newContent || '';
             let editedEl = messageEl.querySelector('.message-edited');
             if (!editedEl) {
                 const metaEl = messageEl.querySelector('.message-meta');
@@ -1711,34 +2094,47 @@ async function loadPinnedMessages(chatId) {
             headers: { 'Authorization': `Bearer ${authToken}` },
         });
         if (!response.ok) throw new Error('Failed to load pinned messages');
-        renderPinnedMessages(await response.json());
+        await renderPinnedMessages(await response.json());
     } catch (error) { console.error('Error loading pinned messages:', error); }
 }
 
-function renderPinnedMessages(messages) {
+async function renderPinnedMessages(messages) {
     pinnedMessagesList.innerHTML = '';
     if (messages.length === 0) {
         pinnedMessagesList.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">No pinned messages</p>';
         return;
     }
-    messages.forEach(msg => {
-        const item = document.createElement('div');
-        item.className = 'pinned-message-item';
-        let preview = msg.content || '';
+    for (const msg of messages) {
+        let inner = await decryptMessageContentIfNeeded({ ...msg, chat_id: currentChatId });
+        if (inner === '[Encrypted message]') inner = '';
+        let preview = inner;
         if (msg.file_url) {
-            const icon = msg.file_type === 'image' ? '📷' : '📎';
-            const name = msg.file_name || (msg.file_type === 'image' ? 'Image' : 'File');
+            const pl = getEncryptedPayloadFromMessage(msg);
+            const aad = parseEncryptedAad(pl);
+            const isImg = (msg.file_type === 'image') || (aad?.original_type?.toLowerCase().startsWith('image/'));
+            const icon = isImg ? '📷' : '📎';
+            const name = aad?.original_name || msg.file_name || (isImg ? 'Image' : 'File');
             preview = preview ? `${icon} ${name}: ${preview}` : `${icon} ${name}`;
         }
-        if (!preview) preview = '<empty message>';
+        if (!preview) preview = '…';
+        const item = document.createElement('div');
+        item.className = 'pinned-message-item';
         item.innerHTML = `<div class="pinned-message-content">${escapeHtml(preview)}</div>
             <div class="pinned-message-meta"><span>${formatTime(msg.created_at)}</span><span>📌</span></div>`;
-        item.addEventListener('click', () => {
+        item.addEventListener('click', async () => {
+            const found = await ensureMessageLoadedAndScroll(msg.id);
+            if (!found) {
+                alert('Could not locate pinned message in chat history');
+                return;
+            }
             const el = document.querySelector(`.message[data-message-id="${msg.id}"]`);
-            if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.style.animation = 'pulse 0.5s ease'; setTimeout(() => el.style.animation = '', 500); }
+            if (el) {
+                el.style.animation = 'pulse 0.5s ease';
+                setTimeout(() => { el.style.animation = ''; }, 500);
+            }
         });
         pinnedMessagesList.appendChild(item);
-    });
+    }
 }
 
 function togglePinnedPanel() {
@@ -1793,31 +2189,118 @@ function navigateSearchResults(direction) {
     if (searchResults.length === 0) return;
     if (searchNavTimeout) clearTimeout(searchNavTimeout);
     searchNavTimeout = setTimeout(() => {
-        if (currentSearchIndex >= 0 && currentSearchIndex < searchResults.length) {
-            const prevEl = document.querySelector(`.message[data-message-id="${searchResults[currentSearchIndex].id}"]`);
-            if (prevEl) prevEl.classList.remove('search-highlight');
-        }
-        currentSearchIndex += direction;
-        if (currentSearchIndex < 0) currentSearchIndex = searchResults.length - 1;
-        if (currentSearchIndex >= searchResults.length) currentSearchIndex = 0;
-        const msgEl = document.querySelector(`.message[data-message-id="${searchResults[currentSearchIndex].id}"]`);
-        if (msgEl) { msgEl.classList.add('search-highlight'); msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
-        updateSearchResultsInfo();
+        void (async () => {
+            if (currentSearchIndex >= 0 && currentSearchIndex < searchResults.length) {
+                const prevEl = document.querySelector(`.message[data-message-id="${searchResults[currentSearchIndex].id}"]`);
+                if (prevEl) prevEl.classList.remove('search-highlight');
+            }
+            currentSearchIndex += direction;
+            if (currentSearchIndex < 0) currentSearchIndex = searchResults.length - 1;
+            if (currentSearchIndex >= searchResults.length) currentSearchIndex = 0;
+            const mid = searchResults[currentSearchIndex].id;
+            await ensureMessageLoadedAndScroll(mid);
+            const msgEl = document.querySelector(`.message[data-message-id="${mid}"]`);
+            if (msgEl) {
+                msgEl.classList.add('search-highlight');
+                scrollToMessage(mid);
+            }
+            updateSearchResultsInfo();
+        })();
     }, 50);
+}
+
+function httpErrorDetailString(detail) {
+    if (detail == null) return '';
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+        return detail
+            .map((e) => (typeof e === 'object' && e !== null && 'msg' in e ? String(e.msg) : JSON.stringify(e)))
+            .join(' ');
+    }
+    return String(detail);
+}
+
+function searchMessagesInLoadedDom(queryLower) {
+    return Array.from(document.querySelectorAll('.message'))
+        .map((el) => {
+            const content = el.querySelector('.message-content')?.textContent || '';
+            const id = parseInt(el.dataset.messageId, 10);
+            return { id, _content: content.toLowerCase() };
+        })
+        .filter((item) => !Number.isNaN(item.id) && item._content.includes(queryLower))
+        .map(({ id }) => ({ id }));
+}
+
+async function searchMessagesInEncryptedHistory(queryLower) {
+    if (!currentChatId) return [];
+    await prepareChatKeyIfNeeded(currentChatId);
+    if (!e2eeEnabled || !window.E2EE?.loadChatKey(currentChatId)) {
+        return searchMessagesInLoadedDom(queryLower);
+    }
+    const matches = [];
+    let offset = 0;
+    while (true) {
+        const batch = await getMessages(currentChatId, MESSAGES_PAGE_SIZE, offset);
+        if (!batch.length) break;
+        for (const msg of batch) {
+            let haystack = '';
+            const payload = getEncryptedPayloadFromMessage(msg);
+            if (payload) {
+                let text = await decryptMessageContentIfNeeded({ ...msg, chat_id: currentChatId });
+                if (text === '[Encrypted message]') text = '';
+                haystack = (text || '').toLowerCase();
+                if (!haystack.trim() && msg.file_url) {
+                    const aad = parseEncryptedAad(payload);
+                    haystack = `${aad?.original_name || ''} ${msg.file_name || ''}`.toLowerCase();
+                }
+            } else {
+                haystack = (msg.content || '').toLowerCase();
+                if (msg.file_url && !haystack.includes(queryLower)) {
+                    haystack += ` ${(msg.file_name || '').toLowerCase()}`;
+                }
+            }
+            if (haystack.includes(queryLower)) {
+                matches.push({ id: msg.id });
+            }
+        }
+        if (batch.length < MESSAGES_PAGE_SIZE) break;
+        offset += MESSAGES_PAGE_SIZE;
+    }
+    return matches;
 }
 
 async function searchMessages(query) {
     if (!query || query.length < 2) { clearSearchResults(); return; }
+    const qLower = query.toLowerCase();
     try {
         const response = await fetch(`${API_BASE_URL}/chats/${currentChatId}/messages/search?q=${encodeURIComponent(query)}`, {
             headers: { 'Authorization': `Bearer ${authToken}` },
         });
-        if (!response.ok) throw new Error('Search failed');
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            const detail = httpErrorDetailString(body.detail).toLowerCase();
+            if (detail.includes('encrypt') || detail.includes('server-side search')) {
+                const localMatches = await searchMessagesInEncryptedHistory(qLower);
+                searchResults = localMatches;
+                highlightSearchResults(localMatches);
+                navigateSearchResults(1);
+                return;
+            }
+            throw new Error(httpErrorDetailString(body.detail) || 'Search failed');
+        }
         const messages = await response.json();
         searchResults = messages; currentSearchIndex = -1;
         highlightSearchResults(messages);
         navigateSearchResults(1);
-    } catch (error) { console.error('Error searching messages:', error); }
+    } catch (error) {
+        console.error('Error searching messages:', error);
+        const localMatches = e2eeEnabled && window.E2EE?.loadChatKey(currentChatId)
+            ? await searchMessagesInEncryptedHistory(qLower)
+            : searchMessagesInLoadedDom(qLower);
+        searchResults = localMatches;
+        highlightSearchResults(localMatches);
+        navigateSearchResults(1);
+    }
 }
 
 function highlightSearchResults(messages) {
@@ -1895,9 +2378,9 @@ function renderGroupMembers(members) {
         const canKick = isAdmin && member.role !== 'admin' && !isMe;
 
         item.innerHTML = `
-            <div class="group-member-avatar">${avatarHtml}</div>
+            <div class="group-member-avatar user-clickable" data-user-id="${member.user_id}" role="button" tabindex="0">${avatarHtml}</div>
             <div class="group-member-info">
-                <div class="group-member-name">${escapeHtml(name)}${isMe ? ' (you)' : ''}</div>
+                <div class="group-member-name user-clickable" data-user-id="${member.user_id}" role="button" tabindex="0">${escapeHtml(name)}${isMe ? ' (you)' : ''}</div>
                 <div class="group-member-email">${escapeHtml(email)}</div>
             </div>
             <span class="group-member-role">${member.role}</span>
@@ -2082,9 +2565,28 @@ sendMessageBtn.addEventListener('click', async () => {
 
     try {
         let fileData = null;
-        if (selectedFile) fileData = await uploadFile(selectedFile);
+        let fileMeta = null;
+        if (selectedFile) {
+            if (e2eeEnabled && window.E2EE?.loadChatKey(currentChatId)) {
+                const encryptedFile = await window.E2EE.encryptFile(currentChatId, selectedFile);
+                fileData = await uploadFile(
+                    new File([encryptedFile.blob], `${selectedFile.name}.enc`, { type: 'application/octet-stream' })
+                );
+                fileMeta = {
+                    file_nonce: encryptedFile.nonce,
+                    original_name: encryptedFile.originalName,
+                    original_type: encryptedFile.originalType,
+                };
+            } else {
+                fileData = await uploadFile(selectedFile);
+            }
+        }
 
         const messagePayload = { content: content || '' };
+        if (e2eeEnabled && window.E2EE?.loadChatKey(currentChatId)) {
+            messagePayload.encrypted_payload = await window.E2EE.encryptText(currentChatId, content || '', fileMeta);
+            messagePayload.content = '';
+        }
         if (replyingToMessage) messagePayload.in_reply_to_id = replyingToMessage.id;
         if (fileData) { messagePayload.file_url = fileData.file_url; messagePayload.file_type = fileData.file_type; messagePayload.file_name = fileData.file_name; }
 
@@ -2103,6 +2605,10 @@ sendMessageBtn.addEventListener('click', async () => {
 
 // Group members panel events
 chatTitle.addEventListener('click', () => {
+    if (!currentChatIsGroup && currentChatId && chatOtherUserId[currentChatId]) {
+        openUserInfoModal(chatOtherUserId[currentChatId]);
+        return;
+    }
     if (currentChatIsGroup && currentChatId) {
         if (groupMembersPanel.classList.contains('hidden')) {
             loadChatMembersPanel(currentChatId);
@@ -2262,6 +2768,50 @@ if (closeProfileBtn) closeProfileBtn.addEventListener('click', closeProfileModal
 if (profileModal) {
     profileModal.addEventListener('click', (e) => {
         if (e.target === profileModal) closeProfileModal();
+    });
+}
+if (closeUserInfoBtn) closeUserInfoBtn.addEventListener('click', closeUserInfoModal);
+if (userInfoModal) {
+    userInfoModal.addEventListener('click', (e) => {
+        if (e.target === userInfoModal) closeUserInfoModal();
+    });
+}
+if (userInfoChatBtn) {
+    userInfoChatBtn.addEventListener('click', async () => {
+        if (!selectedUserInfoId || selectedUserInfoId === currentUserId) return;
+        try {
+            const targetUserId = selectedUserInfoId;
+            const chat = await createDirectChat(targetUserId);
+            let chatDisplayName = '';
+            try {
+                const freshUser = await getUserInfoById(targetUserId);
+                usersCache[targetUserId] = { ...(usersCache[targetUserId] || {}), ...freshUser };
+                chatDisplayName = freshUser.name || freshUser.email?.split('@')[0] || '';
+            } catch (_) {
+                chatDisplayName = getUserDisplayName(targetUserId);
+            }
+            closeUserInfoModal();
+            await loadChats();
+            if (!chatDisplayName || chatDisplayName.startsWith('User ')) {
+                chatDisplayName = chatNamesCache[chat.id] || getUserDisplayName(targetUserId);
+            }
+            navigateToChat(chat.id, chatDisplayName, false);
+        } catch (error) {
+            alert('Failed to create chat: ' + error.message);
+        }
+    });
+}
+if (userInfoFriendBtn) {
+    userInfoFriendBtn.addEventListener('click', async () => {
+        if (!selectedUserInfoId || selectedUserInfoId === currentUserId || userInfoFriendBtn.disabled) return;
+        try {
+            await sendFriendRequest(selectedUserInfoId);
+            userInfoFriendBtn.disabled = true;
+            userInfoFriendBtn.textContent = 'Request sent';
+            await loadPendingRequests();
+        } catch (error) {
+            alert(error.message);
+        }
     });
 }
 

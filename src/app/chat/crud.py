@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, select, func
-from app.chat.models import Message, Chat, ChatMember, MemberRole
+from app.chat.models import Message, Chat, ChatMember, MemberRole, ChatEncryptedKey
 from typing import List, Optional
 from datetime import datetime
 from sqlalchemy.orm import selectinload
@@ -280,6 +280,12 @@ async def get_messages_from_chat(db: AsyncSession, chat_id: int, limit: int = 50
             'sender_id': msg.sender_id,
             'recipient_id': msg.recipient_id,
             'content': msg.content,
+            'ciphertext': msg.ciphertext,
+            'nonce': msg.nonce,
+            'aad': msg.aad,
+            'encryption_version': msg.encryption_version,
+            'sender_key_id': msg.sender_key_id,
+            'is_encrypted': bool(msg.ciphertext),
             'chat_id': msg.chat_id,
             'created_at': msg.created_at,
             'is_delivered': msg.is_delivered,
@@ -298,6 +304,14 @@ async def get_messages_from_chat(db: AsyncSession, chat_id: int, limit: int = 50
             'is_pinned': msg.is_pinned,
             'pinned_at': msg.pinned_at,
         }
+        if msg.ciphertext:
+            msg_dict['encrypted_payload'] = {
+                'ciphertext': msg.ciphertext,
+                'nonce': msg.nonce,
+                'aad': msg.aad,
+                'encryption_version': msg.encryption_version or 'v1',
+                'sender_key_id': msg.sender_key_id,
+            }
 
         # Add reply_to info if exists
         if msg.in_reply_to_id:
@@ -345,12 +359,17 @@ async def get_message_with_reply_info(db: AsyncSession, message_id: int) -> Opti
     }
 
 
-async def create_message(db: AsyncSession, sender_id: int, chat_id: int, content: str,
+async def create_message(db: AsyncSession, sender_id: int, chat_id: int, content: Optional[str] = None,
                          recipient_id: Optional[int] = None,
                          in_reply_to_id: Optional[int] = None,
                          file_url: Optional[str] = None,
                          file_type: Optional[str] = None,
-                         file_name: Optional[str] = None) -> dict:
+                         file_name: Optional[str] = None,
+                         ciphertext: Optional[str] = None,
+                         nonce: Optional[str] = None,
+                         aad: Optional[str] = None,
+                         encryption_version: Optional[str] = None,
+                         sender_key_id: Optional[str] = None) -> dict:
     """Create a message and return as dict."""
     db_message = Message(
         sender_id=sender_id,
@@ -363,7 +382,12 @@ async def create_message(db: AsyncSession, sender_id: int, chat_id: int, content
         in_reply_to_user_id=None,
         file_url=file_url,
         file_type=file_type,
-        file_name=file_name
+        file_name=file_name,
+        ciphertext=ciphertext,
+        nonce=nonce,
+        aad=aad,
+        encryption_version=encryption_version,
+        sender_key_id=sender_key_id,
     )
 
     if in_reply_to_id:
@@ -384,6 +408,12 @@ async def create_message(db: AsyncSession, sender_id: int, chat_id: int, content
         'sender_id': db_message.sender_id,
         'recipient_id': db_message.recipient_id,
         'content': db_message.content,
+        'ciphertext': db_message.ciphertext,
+        'nonce': db_message.nonce,
+        'aad': db_message.aad,
+        'encryption_version': db_message.encryption_version,
+        'sender_key_id': db_message.sender_key_id,
+        'is_encrypted': bool(db_message.ciphertext),
         'chat_id': db_message.chat_id,
         'created_at': db_message.created_at,
         'is_delivered': db_message.is_delivered,
@@ -402,6 +432,14 @@ async def create_message(db: AsyncSession, sender_id: int, chat_id: int, content
         'is_pinned': db_message.is_pinned,
         'pinned_at': db_message.pinned_at,
     }
+    if db_message.ciphertext:
+        message_data['encrypted_payload'] = {
+            'ciphertext': db_message.ciphertext,
+            'nonce': db_message.nonce,
+            'aad': db_message.aad,
+            'encryption_version': db_message.encryption_version or 'v1',
+            'sender_key_id': db_message.sender_key_id,
+        }
 
     try:
         await update_chat_last_message(db, chat_id, db_message.id, db_message.created_at)
@@ -494,6 +532,32 @@ async def edit_message(db: AsyncSession, message_id: int, user_id: int, new_cont
     return message
 
 
+async def edit_message_encrypted(
+    db: AsyncSession,
+    message_id: int,
+    user_id: int,
+    ciphertext: str,
+    nonce: str,
+    aad: Optional[str],
+    encryption_version: Optional[str],
+    sender_key_id: Optional[str],
+) -> Optional[Message]:
+    message = await get_message_by_id(db, message_id)
+    if message and message.sender_id == user_id:
+        message.edit_content = message.content
+        message.content = None
+        message.ciphertext = ciphertext
+        message.nonce = nonce
+        message.aad = aad
+        message.encryption_version = encryption_version
+        message.sender_key_id = sender_key_id
+        message.is_edited = True
+        message.edited_at = datetime.now()
+        await db.commit()
+        await db.refresh(message)
+    return message
+
+
 async def pin_message(db: AsyncSession, message_id: int, user_id: int, chat_id: int) -> Optional[Message]:
     """Pin a message in a chat (only chat participants can pin)."""
     message = await get_message_by_id(db, message_id)
@@ -543,6 +607,7 @@ async def search_messages(
     q = (
         select(Message)
         .where(Message.chat_id == chat_id)
+        .where(Message.content.is_not(None))
         .where(Message.content.ilike(search_query))
         .where(Message.is_deleted == False)
         .order_by(Message.created_at.desc())
@@ -553,6 +618,61 @@ async def search_messages(
     messages = result.scalars().all()
     # Return in ascending order (oldest first)
     return list(reversed(messages))
+
+
+async def upsert_chat_encrypted_key(
+    db: AsyncSession,
+    chat_id: int,
+    user_id: int,
+    key_id: str,
+    encrypted_chat_key: str,
+    key_version: int = 1,
+) -> ChatEncryptedKey:
+    q = select(ChatEncryptedKey).where(
+        ChatEncryptedKey.chat_id == chat_id,
+        ChatEncryptedKey.user_id == user_id,
+        ChatEncryptedKey.key_id == key_id,
+        ChatEncryptedKey.key_version == key_version,
+    )
+    existing = (await db.execute(q)).scalars().first()
+    if existing:
+        existing.encrypted_chat_key = encrypted_chat_key
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+
+    row = ChatEncryptedKey(
+        chat_id=chat_id,
+        user_id=user_id,
+        key_id=key_id,
+        encrypted_chat_key=encrypted_chat_key,
+        key_version=key_version,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+async def get_chat_encrypted_key_for_user(
+    db: AsyncSession,
+    chat_id: int,
+    user_id: int,
+) -> Optional[ChatEncryptedKey]:
+    q = (
+        select(ChatEncryptedKey)
+        .where(ChatEncryptedKey.chat_id == chat_id, ChatEncryptedKey.user_id == user_id)
+        .order_by(ChatEncryptedKey.key_version.desc(), ChatEncryptedKey.created_at.desc())
+    )
+    return (await db.execute(q)).scalars().first()
+
+
+async def delete_chat_encrypted_keys(db: AsyncSession, chat_id: int) -> None:
+    q = select(ChatEncryptedKey).where(ChatEncryptedKey.chat_id == chat_id)
+    rows = (await db.execute(q)).scalars().all()
+    for row in rows:
+        await db.delete(row)
+    await db.commit()
 
 
 # ==================== Group Chat Management ====================

@@ -479,6 +479,20 @@ body {
     border-radius: 50%;
 }
 
+.user-clickable {
+    cursor: pointer;
+    transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.user-clickable:hover {
+    opacity: 0.85;
+}
+
+.user-clickable:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+}
+
 /* Search Bar */
 .search-bar {
     background: var(--bg-secondary);
@@ -674,6 +688,7 @@ body {
 .messages-container {
     flex: 1;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 24px;
     display: flex;
     flex-direction: column;
@@ -814,6 +829,34 @@ body {
 .message-attachment-file-size {
     color: var(--text-secondary);
     font-size: 0.75rem;
+}
+
+.message-attachment-encrypted-image {
+    margin-bottom: 8px;
+    border-radius: 8px;
+    overflow: hidden;
+    min-height: 60px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.message-attachment-encrypted-image .message-attachment-img {
+    max-width: 100%;
+    max-height: 300px;
+    width: 100%;
+    object-fit: cover;
+    border-radius: 8px;
+    cursor: pointer;
+    display: block;
+}
+
+.encrypted-media-placeholder {
+    min-height: 100px;
+}
+
+.encrypted-media-fallback {
+    padding: 12px;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
 }
 
 .message-time {
@@ -2390,4 +2433,51 @@ body {
     font-size: 0.9rem;
     text-align: center;
     animation: fadeIn 0.3s ease;
+}
+
+.user-info-modal-box {
+    max-width: 460px;
+}
+
+.user-info-avatar-section {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 20px;
+}
+
+.user-info-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.user-info-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+}
+
+.user-info-label {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.user-info-value {
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    text-align: right;
+    max-width: 70%;
+    word-break: break-word;
+}
+
+.user-info-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.user-info-actions .btn {
+    flex: 1;
 }

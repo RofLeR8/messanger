@@ -1,4 +1,4 @@
-from app.users.models import User, Friendship, FriendshipStatus
+from app.users.models import User, Friendship, FriendshipStatus, UserPublicKey
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -99,6 +99,48 @@ async def get_users_online_status(db: AsyncSession, user_ids: List[int]) -> dict
     q = select(User.id, User.is_online).where(User.id.in_(user_ids))
     result = await db.execute(q)
     return {row.id: row.is_online for row in result.all()}
+
+
+async def upsert_user_public_key(
+    db: AsyncSession,
+    user_id: int,
+    key_id: str,
+    algorithm: str,
+    public_key: str,
+) -> UserPublicKey:
+    q = select(UserPublicKey).where(
+        UserPublicKey.user_id == user_id,
+        UserPublicKey.key_id == key_id,
+    )
+    existing = (await db.execute(q)).scalars().first()
+    if existing:
+        existing.algorithm = algorithm
+        existing.public_key = public_key
+        existing.revoked_at = None
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+
+    key_row = UserPublicKey(
+        user_id=user_id,
+        key_id=key_id,
+        algorithm=algorithm,
+        public_key=public_key,
+    )
+    db.add(key_row)
+    await db.commit()
+    await db.refresh(key_row)
+    return key_row
+
+
+async def get_active_public_keys_for_user(db: AsyncSession, user_id: int) -> List[UserPublicKey]:
+    q = (
+        select(UserPublicKey)
+        .where(UserPublicKey.user_id == user_id)
+        .where(UserPublicKey.revoked_at.is_(None))
+        .order_by(UserPublicKey.created_at.desc())
+    )
+    return (await db.execute(q)).scalars().all()
 
 
 # Friendships CRUD
