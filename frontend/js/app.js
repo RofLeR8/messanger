@@ -1015,11 +1015,17 @@ async function logout() {
     }
 }
 
+async function handleUnauthorizedSession() {
+    await logout();
+    showAuthSection();
+}
+
 // ==================== API Functions ====================
 async function getChats() {
     const response = await fetch(`${API_BASE_URL}/chats/?t=${Date.now()}`, {
         headers: { 'Authorization': `Bearer ${authToken}` },
     });
+    if (response.status === 401 || response.status === 403) throw new Error('Unauthorized');
     if (!response.ok) throw new Error('Failed to load chats');
     return await response.json();
 }
@@ -1260,7 +1266,12 @@ function connectWebSocket(chatId) {
     };
 
     websocket.onerror = (error) => { console.error('Chat WebSocket error:', error); };
-    websocket.onclose = () => { console.log('Chat WebSocket disconnected'); };
+    websocket.onclose = async (event) => {
+        console.log('Chat WebSocket disconnected');
+        if (event.code === 4001 && authToken) {
+            await handleUnauthorizedSession();
+        }
+    };
 }
 
 function handleWsMessage(data) {
@@ -1418,8 +1429,12 @@ function connectNotificationWebSocket() {
     };
 
     notificationWs.onerror = (error) => { console.error('Notification WebSocket error:', error); };
-    notificationWs.onclose = () => {
+    notificationWs.onclose = async (event) => {
         console.log('Notification WebSocket disconnected');
+        if (event.code === 4001 && authToken) {
+            await handleUnauthorizedSession();
+            return;
+        }
         setTimeout(() => { if (authToken) connectNotificationWebSocket(); }, 3000);
     };
 }
@@ -1911,6 +1926,10 @@ async function loadChats() {
         renderChats(chats, true);
     } catch (error) {
         console.error('Error loading chats:', error);
+        if (!authToken || /401|unauthorized|not authenticated/i.test(String(error?.message || ''))) {
+            await handleUnauthorizedSession();
+            return;
+        }
         showError('Failed to load chats. Please try logging in again.');
     }
 }
@@ -2864,13 +2883,30 @@ if (avatarUploadInput) {
 }
 
 // ==================== Logout update ====================
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
     const savedToken = localStorage.getItem('authToken');
     if (savedToken) {
         authToken = savedToken;
-        showChatSection();
-        loadChats();
-        connectNotificationWebSocket();
+        const currentUser = await getCurrentUserInfo();
+        if (!currentUser) {
+            await handleUnauthorizedSession();
+        } else {
+            currentUserId = currentUser.id;
+            usersCache[currentUserId] = {
+                ...(usersCache[currentUserId] || {}),
+                name: currentUser.name,
+                email: currentUser.email,
+                username: currentUser.username,
+                phone: currentUser.phone,
+                bio: currentUser.bio,
+                avatar_url: currentUser.avatar_url,
+                is_online: currentUser.is_online,
+                last_seen: currentUser.last_seen
+            };
+            showChatSection();
+            loadChats();
+            connectNotificationWebSocket();
+        }
     }
 
     // Fix mobile keyboard: adjust container height when keyboard shows/hides

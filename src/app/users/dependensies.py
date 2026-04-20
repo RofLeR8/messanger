@@ -1,5 +1,4 @@
-from fastapi import Request, HTTPException, status, Depends, WebSocket
-from fastapi.responses import RedirectResponse
+from fastapi import Request, HTTPException, status, Depends
 from jose import jwt, JWTError
 from datetime import datetime, timezone
 from app.config import get_auth_data
@@ -23,39 +22,31 @@ def get_token(request: Request) -> str:
 
 
 async def get_current_user(request: Request, token: str = Depends(get_token), db: AsyncSession = Depends(get_db)):
-    # Check if this is a WebSocket request
-    is_websocket = isinstance(request, WebSocket)
+    unauthorized_exc = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+    )
 
     try:
         auth_data = get_auth_data()
         payload = jwt.decode(token, auth_data['secret_key'], algorithms=auth_data['algorithm'])
     except JWTError:
-        if is_websocket:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-        raise RedirectResponse(url="/")
+        raise unauthorized_exc
 
     expire = payload.get('exp')
     if not expire:
-        if is_websocket:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
-        raise RedirectResponse(url="/")
+        raise unauthorized_exc
 
     expire_time = datetime.fromtimestamp(int(expire), tz=timezone.utc)
     if expire_time < datetime.now(timezone.utc):
-        if is_websocket:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
-        raise RedirectResponse(url="/")
+        raise unauthorized_exc
 
     user_id: str = payload.get('sub')
     if not user_id:
-        if is_websocket:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
-        raise RedirectResponse(url="/")
+        raise unauthorized_exc
 
     user = await get_one_by_id_or_none(db, int(user_id))
     if not user:
-        if is_websocket:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-        raise RedirectResponse(url="/")
+        raise unauthorized_exc
 
     return user
