@@ -18,6 +18,7 @@ let currentFriendsTab = 'all'; // 'all', 'requests', 'search'
 let e2eeEnabled = true;
 const UI_SCALE_STORAGE_KEY = 'ui-scale-percent';
 const DEFAULT_UI_SCALE_PERCENT = 100;
+const e2eeRecoveryRequestedChats = new Set();
 
 // Reply state
 let replyingToMessage = null; // { id, sender_id, content, sender_name }
@@ -221,8 +222,59 @@ async function prepareChatKeyIfNeeded(chatId) {
     try {
         const members = await getChatMembers(chatId);
         await window.E2EE.ensureChatKey(chatId, members, currentUserId, authToken);
+        return true;
     } catch (error) {
+        const msg = String(error?.message || '');
+        if (!e2eeRecoveryRequestedChats.has(chatId) && (
+            msg.includes('CHAT_KEY_MISMATCH') ||
+            msg.includes('OperationError') ||
+            msg.includes('Failed to provision encrypted key')
+        )) {
+            e2eeRecoveryRequestedChats.add(chatId);
+            fetch(`${API_BASE_URL}/chats/${chatId}/keys/recovery-request`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${authToken}` },
+            }).catch(() => {});
+        }
         console.warn('E2EE key setup skipped:', error);
+        return false;
+    }
+}
+
+function renderMessagesLoadError(chatId) {
+    messagesContainer.innerHTML = `
+        <div class="messages-error-state">
+            <div class="messages-error-title">Не удалось загрузить сообщения</div>
+            <div class="messages-error-text">Проблема с ключами шифрования. Нажмите "Повторить".</div>
+            <button id="retry-load-messages-btn" class="btn btn-primary">Повторить</button>
+        </div>
+    `;
+    const retryBtn = document.getElementById('retry-load-messages-btn');
+    if (retryBtn) {
+        retryBtn.addEventListener('click', () => retryLoadMessagesWithRecovery(chatId));
+    }
+}
+
+async function retryLoadMessagesWithRecovery(chatId) {
+    const retryBtn = document.getElementById('retry-load-messages-btn');
+    if (retryBtn) {
+        retryBtn.disabled = true;
+        retryBtn.textContent = 'Восстановление...';
+    }
+    try {
+        if (window.E2EE && authToken) {
+            await window.E2EE.rotateDeviceKey(authToken, chatId);
+        }
+        e2eeRecoveryRequestedChats.delete(chatId);
+        const ready = await prepareChatKeyIfNeeded(chatId);
+        if (!ready) {
+            throw new Error('Recovery still pending');
+        }
+        await loadMessages(chatId);
+        connectWebSocket(chatId);
+    } catch (error) {
+        console.warn('Retry messages load failed:', error);
+        renderMessagesLoadError(chatId);
     }
 }
 
@@ -715,8 +767,12 @@ async function navigateToChat(chatId, chatName, isGroup) {
 
     hideElement(groupMembersPanel);
     const targetChatId = chatId;
-    await prepareChatKeyIfNeeded(chatId);
+    const keyReady = await prepareChatKeyIfNeeded(chatId);
     if (currentChatId !== targetChatId) return;
+    if (!keyReady && e2eeEnabled) {
+        renderMessagesLoadError(chatId);
+        return;
+    }
     await loadMessages(chatId);
     if (currentChatId !== targetChatId) return;
     connectWebSocket(chatId);
@@ -1472,6 +1528,13 @@ function connectNotificationWebSocket() {
                     navigateToChats();
                 }
                 break;
+
+            case 'key_recovery_requested':
+                if (data.chat_id) refreshChats();
+                if (window.E2EE && authToken && data.chat_id && data.requested_by && data.requested_by !== currentUserId) {
+                    window.E2EE.shareChatKeyToUser(data.chat_id, data.requested_by, authToken).catch(() => {});
+                }
+                break;
         }
     };
 
@@ -1683,6 +1746,7 @@ async function loadMessages(chatId) {
         initInfiniteScroll();
     } catch (error) {
         console.error('Error loading messages:', error);
+        renderMessagesLoadError(chatId);
     }
 }
 

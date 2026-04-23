@@ -76,6 +76,17 @@
         return parsed[chatId];
     }
 
+    function removeChatKey(chatId) {
+        chatKeyCache.delete(chatId);
+        const str = localStorage.getItem(STORE_CHAT_KEYS);
+        if (!str) return;
+        const parsed = JSON.parse(str);
+        if (parsed[chatId]) {
+            delete parsed[chatId];
+            localStorage.setItem(STORE_CHAT_KEYS, JSON.stringify(parsed));
+        }
+    }
+
     async function importAesKey(base64Key) {
         return crypto.subtle.importKey('raw', fromBase64(base64Key), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
     }
@@ -85,31 +96,7 @@
         return toBase64(new Uint8Array(raw));
     }
 
-    async function ensureChatKey(chatId, members, currentUserId, authToken) {
-        const existing = loadChatKey(chatId);
-        if (existing) return existing;
-
-        const mine = await fetch(`/chats/${chatId}/keys/me`, { headers: { Authorization: `Bearer ${authToken}` } });
-        if (mine.ok) {
-            try {
-                const myKey = await mine.json();
-                const pair = await getOrCreateDeviceKeyPair();
-                const decryptedRaw = await crypto.subtle.decrypt(
-                    { name: 'RSA-OAEP' },
-                    pair.privateKey,
-                    fromBase64(myKey.encrypted_chat_key),
-                );
-                const keyBase64 = toBase64(new Uint8Array(decryptedRaw));
-                const cached = { keyVersion: myKey.key_version, key: keyBase64 };
-                saveChatKey(chatId, myKey.key_version, keyBase64);
-                chatKeyCache.set(chatId, cached);
-                return cached;
-            } catch (error) {
-                // Stale/invalid wrapped key for this device: continue to re-provision below.
-                console.warn('E2EE: failed to decrypt my chat key, trying reprovision', error);
-            }
-        }
-
+    async function bootstrapChatKeyForMembers(chatId, members, currentUserId, authToken) {
         const pair = await getOrCreateDeviceKeyPair();
         const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
         const exportedKey = await exportAesKey(aesKey);
@@ -133,14 +120,11 @@
                     key_id: pair.keyId,
                     encrypted_chat_key: toBase64(new Uint8Array(encrypted)),
                     key_version: keyVersion,
+                    backup_key_plaintext: uid === currentUserId ? exportedKey : undefined,
                 }),
             });
-            if (storeResp.ok && uid === currentUserId) {
-                selfKeyStored = true;
-            }
-            if (storeResp.ok && uid !== currentUserId) {
-                peerKeyStored = true;
-            }
+            if (storeResp.ok && uid === currentUserId) selfKeyStored = true;
+            if (storeResp.ok && uid !== currentUserId) peerKeyStored = true;
         }
 
         if (!selfKeyStored || !peerKeyStored) {
@@ -150,6 +134,88 @@
         const cached = { keyVersion, key: exportedKey };
         chatKeyCache.set(chatId, cached);
         return cached;
+    }
+
+    async function ensureChatKey(chatId, members, currentUserId, authToken) {
+        const existing = loadChatKey(chatId);
+        if (existing) return existing;
+
+        const mine = await fetch(`/chats/${chatId}/keys/me`, { headers: { Authorization: `Bearer ${authToken}` } });
+        if (mine.ok) {
+            try {
+                const myKey = await mine.json();
+                const pair = await getOrCreateDeviceKeyPair();
+                const decryptedRaw = await crypto.subtle.decrypt(
+                    { name: 'RSA-OAEP' },
+                    pair.privateKey,
+                    fromBase64(myKey.encrypted_chat_key),
+                );
+                const keyBase64 = toBase64(new Uint8Array(decryptedRaw));
+                const cached = { keyVersion: myKey.key_version, key: keyBase64 };
+                saveChatKey(chatId, myKey.key_version, keyBase64);
+                chatKeyCache.set(chatId, cached);
+                return cached;
+            } catch (error) {
+                const recoverResp = await fetch(`/chats/${chatId}/keys/me/recover`, {
+                    headers: { Authorization: `Bearer ${authToken}` },
+                });
+                if (recoverResp.ok) {
+                    const recovered = await recoverResp.json();
+                    const recoveredBase64 = recovered.chat_key_plaintext;
+                    saveChatKey(chatId, recovered.key_version || 1, recoveredBase64);
+                    chatKeyCache.set(chatId, { keyVersion: recovered.key_version || 1, key: recoveredBase64 });
+                    try {
+                        await shareChatKeyToUser(chatId, currentUserId, authToken, recoveredBase64, recovered.key_version || 1, true);
+                    } catch (_) {}
+                    return { keyVersion: recovered.key_version || 1, key: recoveredBase64 };
+                }
+                const wrapped = new Error('CHAT_KEY_MISMATCH');
+                wrapped.cause = error;
+                throw wrapped;
+            }
+        }
+
+        if (mine.status === 404) {
+            return bootstrapChatKeyForMembers(chatId, members, currentUserId, authToken);
+        }
+        throw new Error(`Failed to load chat key: ${mine.status}`);
+    }
+
+    async function rotateDeviceKey(authToken, chatId = null) {
+        localStorage.removeItem(STORE_KEYPAIR);
+        localStorage.removeItem(STORE_KEYID);
+        if (chatId != null) {
+            removeChatKey(chatId);
+        }
+        await uploadMyPublicKey(authToken);
+    }
+
+    async function shareChatKeyToUser(chatId, targetUserId, authToken, overrideKey = null, overrideVersion = null, includeBackup = false) {
+        const chatKey = overrideKey ? { key: overrideKey, keyVersion: overrideVersion || 1 } : loadChatKey(chatId);
+        if (!chatKey) throw new Error('Missing local chat key');
+        const myKeyId = localStorage.getItem(STORE_KEYID);
+        if (!myKeyId) throw new Error('Missing device key id');
+
+        const keysResp = await fetch(`/users/${targetUserId}/keys`, { headers: { Authorization: `Bearer ${authToken}` } });
+        if (!keysResp.ok) throw new Error('Failed to load target public key');
+        const keys = await keysResp.json();
+        const active = keys[0];
+        if (!active) throw new Error('Target has no public keys');
+        const memberPub = await crypto.subtle.importKey('jwk', JSON.parse(active.public_key), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt']);
+        const encrypted = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, memberPub, fromBase64(chatKey.key));
+        const resp = await fetch(`/chats/${chatId}/keys/${targetUserId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+            body: JSON.stringify({
+                key_id: myKeyId,
+                encrypted_chat_key: toBase64(new Uint8Array(encrypted)),
+                key_version: chatKey.keyVersion || 1,
+                backup_key_plaintext: includeBackup ? chatKey.key : undefined,
+            }),
+        });
+        if (!resp.ok) {
+            throw new Error(`Failed to share chat key: ${resp.status}`);
+        }
     }
 
     async function encryptText(chatId, content, extraAad = null) {
@@ -216,6 +282,8 @@
         getOrCreateDeviceKeyPair,
         uploadMyPublicKey,
         ensureChatKey,
+        rotateDeviceKey,
+        shareChatKeyToUser,
         encryptText,
         decryptPayload,
         encryptFile,

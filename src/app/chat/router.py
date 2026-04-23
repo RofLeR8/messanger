@@ -31,6 +31,7 @@ from app.chat.crud import (
     get_member_role,
     upsert_chat_encrypted_key,
     get_chat_encrypted_key_for_user,
+    get_chat_backup_key_for_user,
     edit_message_encrypted,
     delete_chat_encrypted_keys,
 )
@@ -305,6 +306,24 @@ async def get_my_chat_key(
     return chat_key
 
 
+@router.get("/{chat_id}/keys/me/recover")
+async def recover_my_chat_key(
+    chat_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    current_user_id = user.id
+    await _verify_user_in_chat(db, chat_id, current_user_id)
+    backup = await get_chat_backup_key_for_user(db, chat_id, current_user_id)
+    if not backup:
+        raise HTTPException(status_code=404, detail="No recovery key for this user")
+    return {
+        "chat_id": chat_id,
+        "key_version": backup.key_version,
+        "chat_key_plaintext": backup.encrypted_chat_key,
+    }
+
+
 @router.post("/{chat_id}/keys/{user_id}", response_model=SChatEncryptedKeyRead)
 async def upsert_chat_key_for_member(
     chat_id: int,
@@ -333,8 +352,54 @@ async def upsert_chat_key_for_member(
         key_id=key_data.key_id,
         encrypted_chat_key=key_data.encrypted_chat_key,
         key_version=key_data.key_version,
+        backup_key_plaintext=key_data.backup_key_plaintext if user_id == current_user_id else None,
     )
     return chat_key
+
+
+@router.post("/{chat_id}/keys/recovery-request")
+async def request_chat_key_recovery(
+    chat_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Request key re-wrap/recovery for this user when device keys were rotated/lost."""
+    current_user_id = user.id
+    chat = await _verify_user_in_chat(db, chat_id, current_user_id)
+    members = await get_chat_members(db, chat_id)
+
+    notified_user_ids = []
+    if chat.is_group:
+        # In group chats only admins can publish wrapped keys for members.
+        for member in members:
+            if member.user_id == current_user_id:
+                continue
+            if member.role == MemberRole.admin:
+                notified_user_ids.append(member.user_id)
+    else:
+        # In direct chats peer can re-wrap key for the requester.
+        for member in members:
+            if member.user_id != current_user_id:
+                notified_user_ids.append(member.user_id)
+                break
+
+    for user_id in notified_user_ids:
+        await manager.send_notification(
+            {
+                "type": "key_recovery_requested",
+                "chat_id": chat_id,
+                "requested_by": current_user_id,
+                "is_group": chat.is_group,
+            },
+            user_id,
+        )
+
+    return {
+        "success": True,
+        "chat_id": chat_id,
+        "notified_count": len(notified_user_ids),
+        "requires_admin_action": bool(chat.is_group),
+    }
 
 
 @router.post("/{chat_id}/messages", status_code=status.HTTP_201_CREATED)

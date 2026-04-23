@@ -177,6 +177,9 @@ class SChatEncryptedKeyCreate(BaseModel):
     key_id: str = Field(..., min_length=1, max_length=128)
     encrypted_chat_key: str = Field(..., min_length=1)
     key_version: int = Field(default=1, ge=1)
+    backup_key_plaintext: Optional[str] = Field(
+        None, min_length=1, description="Server-side recovery copy (base64 raw chat key)"
+    )
 
 
 class SChatEncryptedKeyRead(BaseModel):

@@ -698,6 +698,31 @@ body {
     gap: 12px;
 }
 
+.messages-error-state {
+    margin: auto;
+    max-width: 420px;
+    width: 100%;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 18px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.messages-error-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.messages-error-text {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
 .message {
     max-width: 70%;
     padding: 14px 18px;
