@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str
     E2EE_ENABLED: bool = True
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_REQUESTS_PER_MINUTE: int = 120
+    RATE_LIMIT_BURST: int = 30
     model_config = SettingsConfigDict(
         env_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"),
         extra="allow"
@@ -25,5 +28,9 @@ def get_auth_data():
 
 def is_e2ee_enabled() -> bool:
     return bool(settings.E2EE_ENABLED)
+
+
+def is_rate_limit_enabled() -> bool:
+    return bool(settings.RATE_LIMIT_ENABLED)
 
     
