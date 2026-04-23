@@ -6,6 +6,8 @@ from datetime import datetime
 from sqlalchemy.orm import selectinload
 from app.users.crud import get_one_by_id_or_none
 
+SERVER_BACKUP_KEY_ID = "__server_backup__"
+
 
 # ==================== Chat Members CRUD ====================
 
@@ -627,6 +629,7 @@ async def upsert_chat_encrypted_key(
     key_id: str,
     encrypted_chat_key: str,
     key_version: int = 1,
+    backup_key_plaintext: Optional[str] = None,
 ) -> ChatEncryptedKey:
     q = select(ChatEncryptedKey).where(
         ChatEncryptedKey.chat_id == chat_id,
@@ -637,21 +640,42 @@ async def upsert_chat_encrypted_key(
     existing = (await db.execute(q)).scalars().first()
     if existing:
         existing.encrypted_chat_key = encrypted_chat_key
-        await db.commit()
-        await db.refresh(existing)
-        return existing
+        primary = existing
+    else:
+        row = ChatEncryptedKey(
+            chat_id=chat_id,
+            user_id=user_id,
+            key_id=key_id,
+            encrypted_chat_key=encrypted_chat_key,
+            key_version=key_version,
+        )
+        db.add(row)
+        primary = row
 
-    row = ChatEncryptedKey(
-        chat_id=chat_id,
-        user_id=user_id,
-        key_id=key_id,
-        encrypted_chat_key=encrypted_chat_key,
-        key_version=key_version,
-    )
-    db.add(row)
+    if backup_key_plaintext:
+        backup_q = select(ChatEncryptedKey).where(
+            ChatEncryptedKey.chat_id == chat_id,
+            ChatEncryptedKey.user_id == user_id,
+            ChatEncryptedKey.key_id == SERVER_BACKUP_KEY_ID,
+        )
+        backup_row = (await db.execute(backup_q)).scalars().first()
+        if backup_row:
+            backup_row.encrypted_chat_key = backup_key_plaintext
+            backup_row.key_version = key_version
+        else:
+            db.add(
+                ChatEncryptedKey(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    key_id=SERVER_BACKUP_KEY_ID,
+                    encrypted_chat_key=backup_key_plaintext,
+                    key_version=key_version,
+                )
+            )
+
     await db.commit()
-    await db.refresh(row)
-    return row
+    await db.refresh(primary)
+    return primary
 
 
 async def get_chat_encrypted_key_for_user(
@@ -662,6 +686,24 @@ async def get_chat_encrypted_key_for_user(
     q = (
         select(ChatEncryptedKey)
         .where(ChatEncryptedKey.chat_id == chat_id, ChatEncryptedKey.user_id == user_id)
+        .where(ChatEncryptedKey.key_id != SERVER_BACKUP_KEY_ID)
+        .order_by(ChatEncryptedKey.key_version.desc(), ChatEncryptedKey.created_at.desc())
+    )
+    return (await db.execute(q)).scalars().first()
+
+
+async def get_chat_backup_key_for_user(
+    db: AsyncSession,
+    chat_id: int,
+    user_id: int,
+) -> Optional[ChatEncryptedKey]:
+    q = (
+        select(ChatEncryptedKey)
+        .where(
+            ChatEncryptedKey.chat_id == chat_id,
+            ChatEncryptedKey.user_id == user_id,
+            ChatEncryptedKey.key_id == SERVER_BACKUP_KEY_ID,
+        )
         .order_by(ChatEncryptedKey.key_version.desc(), ChatEncryptedKey.created_at.desc())
     )
     return (await db.execute(q)).scalars().first()
