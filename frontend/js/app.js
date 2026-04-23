@@ -16,6 +16,8 @@ let currentChatIsGroup = false; // Track if current chat is a group
 let currentActiveTab = 'chats'; // 'chats' or 'friends'
 let currentFriendsTab = 'all'; // 'all', 'requests', 'search'
 let e2eeEnabled = true;
+const UI_SCALE_STORAGE_KEY = 'ui-scale-percent';
+const DEFAULT_UI_SCALE_PERCENT = 100;
 
 // Reply state
 let replyingToMessage = null; // { id, sender_id, content, sender_name }
@@ -45,9 +47,12 @@ let currentChatMembers = []; // Cached members of current chat
 const authSection = document.getElementById('auth-section');
 const chatSection = document.getElementById('chat-section');
 const mainTabs = document.getElementById('main-tabs');
+const appContainer = document.querySelector('.app-container');
 const tabChats = document.getElementById('tab-chats');
 const tabFriends = document.getElementById('tab-friends');
+const tabSettings = document.getElementById('tab-settings');
 const friendsPage = document.getElementById('friends-page');
+const settingsPage = document.getElementById('settings-page');
 const friendsTabs = document.getElementById('friends-tabs');
 const friendsTabAll = document.getElementById('friends-tab-all');
 const friendsTabRequests = document.getElementById('friends-tab-requests');
@@ -96,6 +101,7 @@ const attachFileBtn = document.getElementById('attach-file-btn');
 // Pages
 const chatsPage = document.getElementById('chats-page');
 const chatPage = document.getElementById('chat-page');
+const uiScaleSelect = document.getElementById('ui-scale-select');
 
 // Modals
 const directChatModal = document.getElementById('direct-chat-modal');
@@ -223,8 +229,12 @@ async function prepareChatKeyIfNeeded(chatId) {
 async function decryptMessageContentIfNeeded(message) {
     const payload = getEncryptedPayloadFromMessage(message);
     if (!payload || !window.E2EE) return message.content || '';
+    const chatId = message.chat_id || currentChatId;
+    if (!window.E2EE.loadChatKey(chatId)) {
+        return message.file_url ? '' : '[Encrypted message]';
+    }
     try {
-        const decrypted = await window.E2EE.decryptPayload(message.chat_id || currentChatId, payload);
+        const decrypted = await window.E2EE.decryptPayload(chatId, payload);
         if (decrypted == null) return message.content || '';
         // File-only messages: ciphertext decrypts to empty string — not an error
         if (decrypted === '' && message.file_url) return '';
@@ -638,7 +648,7 @@ function updateChatsList(chats, animate = true) {
     }
 }
 
-function navigateToChat(chatId, chatName, isGroup) {
+async function navigateToChat(chatId, chatName, isGroup) {
     currentChatId = chatId;
     currentChatIsGroup = isGroup;
     chatTitle.textContent = chatName;
@@ -704,13 +714,47 @@ function navigateToChat(chatId, chatName, isGroup) {
     chatPage.classList.remove('inactive');
 
     hideElement(groupMembersPanel);
-    prepareChatKeyIfNeeded(chatId);
-    loadMessages(chatId);
+    const targetChatId = chatId;
+    await prepareChatKeyIfNeeded(chatId);
+    if (currentChatId !== targetChatId) return;
+    await loadMessages(chatId);
+    if (currentChatId !== targetChatId) return;
     connectWebSocket(chatId);
     stopNotificationCheck();
 }
 
 function stopNotificationCheck() {}
+
+function normalizeUiScalePercent(value) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return DEFAULT_UI_SCALE_PERCENT;
+    return Math.min(120, Math.max(85, parsed));
+}
+
+function applyUiScalePercent(value, persist = true) {
+    const scalePercent = normalizeUiScalePercent(value);
+    const scaleMultiplier = scalePercent / 100;
+    document.documentElement.style.setProperty('--ui-scale', String(scaleMultiplier));
+    if (uiScaleSelect) {
+        uiScaleSelect.value = String(scalePercent);
+    }
+    if (appContainer && window.visualViewport) {
+        appContainer.style.height = `${window.visualViewport.height / scaleMultiplier}px`;
+    }
+    if (persist) {
+        localStorage.setItem(UI_SCALE_STORAGE_KEY, String(scalePercent));
+    }
+}
+
+function initUiScaleSettings() {
+    const saved = localStorage.getItem(UI_SCALE_STORAGE_KEY);
+    applyUiScalePercent(saved ?? DEFAULT_UI_SCALE_PERCENT, false);
+    if (uiScaleSelect) {
+        uiScaleSelect.addEventListener('change', (e) => {
+            applyUiScalePercent(e.target.value);
+        });
+    }
+}
 
 // ==================== Tab Switching ====================
 function switchToTab(tab) {
@@ -729,10 +773,13 @@ function switchToTab(tab) {
     currentActiveTab = tab;
     tabChats.classList.toggle('active', tab === 'chats');
     tabFriends.classList.toggle('active', tab === 'friends');
+    if (tabSettings) tabSettings.classList.toggle('active', tab === 'settings');
     chatsPage.classList.toggle('active', tab === 'chats');
     friendsPage.classList.toggle('active', tab === 'friends');
+    if (settingsPage) settingsPage.classList.toggle('active', tab === 'settings');
     chatsPage.classList.toggle('inactive', tab !== 'chats');
     friendsPage.classList.toggle('inactive', tab !== 'friends');
+    if (settingsPage) settingsPage.classList.toggle('inactive', tab !== 'settings');
 
     if (tab === 'friends') {
         loadFriendsPage();
@@ -2689,6 +2736,9 @@ if (tabChats) {
 if (tabFriends) {
     tabFriends.addEventListener('click', () => switchToTab('friends'));
 }
+if (tabSettings) {
+    tabSettings.addEventListener('click', () => switchToTab('settings'));
+}
 
 // ==================== Friends Sub-tabs ====================
 if (friendsTabAll) {
@@ -2884,6 +2934,7 @@ if (avatarUploadInput) {
 
 // ==================== Logout update ====================
 window.addEventListener('DOMContentLoaded', async () => {
+    initUiScaleSettings();
     const savedToken = localStorage.getItem('authToken');
     if (savedToken) {
         authToken = savedToken;
@@ -2911,11 +2962,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // Fix mobile keyboard: adjust container height when keyboard shows/hides
     if (window.visualViewport) {
-        const appContainer = document.querySelector('.app-container');
-        
         window.visualViewport.addEventListener('resize', () => {
             // Set container height to visible viewport area (excluding keyboard)
-            appContainer.style.height = window.visualViewport.height + 'px';
+            const scalePercent = normalizeUiScalePercent(localStorage.getItem(UI_SCALE_STORAGE_KEY) ?? DEFAULT_UI_SCALE_PERCENT);
+            const scaleMultiplier = scalePercent / 100;
+            appContainer.style.height = (window.visualViewport.height / scaleMultiplier) + 'px';
             
             // Scroll to bottom of messages when keyboard appears
             if (messagesContainer) {
