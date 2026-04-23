@@ -91,18 +91,23 @@
 
         const mine = await fetch(`/chats/${chatId}/keys/me`, { headers: { Authorization: `Bearer ${authToken}` } });
         if (mine.ok) {
-            const myKey = await mine.json();
-            const pair = await getOrCreateDeviceKeyPair();
-            const decryptedRaw = await crypto.subtle.decrypt(
-                { name: 'RSA-OAEP' },
-                pair.privateKey,
-                fromBase64(myKey.encrypted_chat_key),
-            );
-            const keyBase64 = toBase64(new Uint8Array(decryptedRaw));
-            const cached = { keyVersion: myKey.key_version, key: keyBase64 };
-            saveChatKey(chatId, myKey.key_version, keyBase64);
-            chatKeyCache.set(chatId, cached);
-            return cached;
+            try {
+                const myKey = await mine.json();
+                const pair = await getOrCreateDeviceKeyPair();
+                const decryptedRaw = await crypto.subtle.decrypt(
+                    { name: 'RSA-OAEP' },
+                    pair.privateKey,
+                    fromBase64(myKey.encrypted_chat_key),
+                );
+                const keyBase64 = toBase64(new Uint8Array(decryptedRaw));
+                const cached = { keyVersion: myKey.key_version, key: keyBase64 };
+                saveChatKey(chatId, myKey.key_version, keyBase64);
+                chatKeyCache.set(chatId, cached);
+                return cached;
+            } catch (error) {
+                // Stale/invalid wrapped key for this device: continue to re-provision below.
+                console.warn('E2EE: failed to decrypt my chat key, trying reprovision', error);
+            }
         }
 
         const pair = await getOrCreateDeviceKeyPair();
@@ -110,6 +115,8 @@
         const exportedKey = await exportAesKey(aesKey);
         const keyVersion = 1;
 
+        let selfKeyStored = false;
+        let peerKeyStored = false;
         for (const member of members) {
             const uid = member.user_id || member.id;
             const keysResp = await fetch(`/users/${uid}/keys`, { headers: { Authorization: `Bearer ${authToken}` } });
@@ -119,7 +126,7 @@
             if (!active) continue;
             const memberPub = await crypto.subtle.importKey('jwk', JSON.parse(active.public_key), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt']);
             const encrypted = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, memberPub, fromBase64(exportedKey));
-            await fetch(`/chats/${chatId}/keys/${uid}`, {
+            const storeResp = await fetch(`/chats/${chatId}/keys/${uid}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
                 body: JSON.stringify({
@@ -128,8 +135,17 @@
                     key_version: keyVersion,
                 }),
             });
+            if (storeResp.ok && uid === currentUserId) {
+                selfKeyStored = true;
+            }
+            if (storeResp.ok && uid !== currentUserId) {
+                peerKeyStored = true;
+            }
         }
 
+        if (!selfKeyStored || !peerKeyStored) {
+            throw new Error('Failed to provision encrypted key for current device');
+        }
         saveChatKey(chatId, keyVersion, exportedKey);
         const cached = { keyVersion, key: exportedKey };
         chatKeyCache.set(chatId, cached);
