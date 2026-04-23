@@ -103,7 +103,6 @@
         const keyVersion = 1;
 
         let selfKeyStored = false;
-        let peerKeyStored = false;
         for (const member of members) {
             const uid = member.user_id || member.id;
             const keysResp = await fetch(`/users/${uid}/keys`, { headers: { Authorization: `Bearer ${authToken}` } });
@@ -120,14 +119,14 @@
                     key_id: pair.keyId,
                     encrypted_chat_key: toBase64(new Uint8Array(encrypted)),
                     key_version: keyVersion,
+                    // Always store backup for current user
                     backup_key_plaintext: uid === currentUserId ? exportedKey : undefined,
                 }),
             });
             if (storeResp.ok && uid === currentUserId) selfKeyStored = true;
-            if (storeResp.ok && uid !== currentUserId) peerKeyStored = true;
         }
 
-        if (!selfKeyStored || !peerKeyStored) {
+        if (!selfKeyStored) {
             throw new Error('Failed to provision encrypted key for current device');
         }
         saveChatKey(chatId, keyVersion, exportedKey);

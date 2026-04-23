@@ -324,37 +324,8 @@ async def recover_my_chat_key(
     }
 
 
-@router.post("/{chat_id}/keys/{user_id}", response_model=SChatEncryptedKeyRead)
-async def upsert_chat_key_for_member(
-    chat_id: int,
-    user_id: int,
-    key_data: SChatEncryptedKeyCreate,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    current_user_id = user.id
-    chat = await _verify_user_in_chat(db, chat_id, current_user_id)
 
-    if chat.is_group:
-        role = await get_member_role(db, chat_id, current_user_id)
-        if role != MemberRole.admin:
-            raise HTTPException(status_code=403, detail="Only admin can set group chat keys")
-    # Direct chat: any participant may store the AES key wrapped for themselves or their peer
-    # (each user_id row holds ciphertext only that user can open with their device key).
 
-    if not await is_chat_member(db, chat_id, user_id):
-        raise HTTPException(status_code=404, detail="Target user is not chat member")
-
-    chat_key = await upsert_chat_encrypted_key(
-        db=db,
-        chat_id=chat_id,
-        user_id=user_id,
-        key_id=key_data.key_id,
-        encrypted_chat_key=key_data.encrypted_chat_key,
-        key_version=key_data.key_version,
-        backup_key_plaintext=key_data.backup_key_plaintext if user_id == current_user_id else None,
-    )
-    return chat_key
 
 
 @router.post("/{chat_id}/keys/recovery-request")
@@ -400,6 +371,39 @@ async def request_chat_key_recovery(
         "notified_count": len(notified_user_ids),
         "requires_admin_action": bool(chat.is_group),
     }
+
+
+@router.post("/{chat_id}/keys/{user_id}", response_model=SChatEncryptedKeyRead)
+async def upsert_chat_key_for_member(
+    chat_id: int,
+    user_id: int,
+    key_data: SChatEncryptedKeyCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    current_user_id = user.id
+    chat = await _verify_user_in_chat(db, chat_id, current_user_id)
+
+    if chat.is_group:
+        role = await get_member_role(db, chat_id, current_user_id)
+        if role != MemberRole.admin:
+            raise HTTPException(status_code=403, detail="Only admin can set group chat keys")
+    # Direct chat: any participant may store the AES key wrapped for themselves or their peer
+    # (each user_id row holds ciphertext only that user can open with their device key).
+
+    if not await is_chat_member(db, chat_id, user_id):
+        raise HTTPException(status_code=404, detail="Target user is not chat member")
+
+    chat_key = await upsert_chat_encrypted_key(
+        db=db,
+        chat_id=chat_id,
+        user_id=user_id,
+        key_id=key_data.key_id,
+        encrypted_chat_key=key_data.encrypted_chat_key,
+        key_version=key_data.key_version,
+        backup_key_plaintext=key_data.backup_key_plaintext if user_id == current_user_id else None,
+    )
+    return chat_key
 
 
 @router.post("/{chat_id}/messages", status_code=status.HTTP_201_CREATED)
