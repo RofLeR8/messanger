@@ -284,28 +284,19 @@ async function decryptMessageContentIfNeeded(message) {
     const chatId = message.chat_id || currentChatId;
     const chatKey = window.E2EE.loadChatKey(chatId);
     if (!chatKey) {
-        console.warn('[E2EE] No chat key for chat', chatId, 'message', message.id);
         return message.file_url ? '' : '[Encrypted message]';
     }
     try {
         const decrypted = await window.E2EE.decryptPayload(chatId, payload);
-        console.log('[E2EE] Decrypted message', message.id, ':', decrypted ? decrypted.substring(0, 50) : '(empty)');
         if (decrypted == null) {
-            console.warn('[E2EE] decryptPayload returned null for message', message.id);
             return message.content || '';
         }
         // File-only messages: ciphertext decrypts to empty string — not an error
         if (decrypted === '' && message.file_url) {
-            console.log('[E2EE] File-only message, empty content expected');
-            return '';
-        }
-        if (decrypted === '') {
-            console.log('[E2EE] Empty decrypted content for text message', message.id);
             return '';
         }
         return decrypted;
     } catch (error) {
-        console.error('[E2EE] Failed to decrypt message', message.id, 'error:', error);
         return message.file_url ? '' : '[Encrypted message]';
     }
 }
@@ -2727,12 +2718,8 @@ sendMessageBtn.addEventListener('click', async () => {
 
         const messagePayload = { content: content || '' };
         if (e2eeEnabled && window.E2EE?.loadChatKey(currentChatId)) {
-            console.log('[E2EE] Encrypting message for chat', currentChatId, 'content:', content ? content.substring(0, 50) : '(empty)', 'fileMeta:', fileMeta);
             messagePayload.encrypted_payload = await window.E2EE.encryptText(currentChatId, content || '', fileMeta);
-            console.log('[E2EE] Encrypted payload:', messagePayload.encrypted_payload);
             messagePayload.content = '';
-        } else {
-            console.log('[E2EE] Skipping encryption, key loaded:', !!window.E2EE?.loadChatKey(currentChatId));
         }
         if (replyingToMessage) messagePayload.in_reply_to_id = replyingToMessage.id;
         if (fileData) { messagePayload.file_url = fileData.file_url; messagePayload.file_type = fileData.file_type; messagePayload.file_name = fileData.file_name; }
