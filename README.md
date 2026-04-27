@@ -1,200 +1,99 @@
-# API Endpoints
+# Мессенджер (Back-Messanger)
 
-## Authentication (`/auth`)
+Веб-мессенджер с поддержкой обмена сообщениями в реальном времени, аутентификацией пользователей и загрузкой файлов.
 
-### Register User
+## Описание проекта
+
+Проект представляет собой бэкенд для мессенджера, построенный на **FastAPI** с использованием **PostgreSQL** в качестве базы данных. Приложение поддерживает:
+
+- **Аутентификацию пользователей** — регистрация, вход/выход с использованием JWT-токенов
+- **Чаты и сообщения** — создание чатов, отправка и получение сообщений
+- **WebSocket** — обмен сообщениями в реальном времени
+- **Загрузку файлов** — возможность прикреплять файлы к сообщениям
+
+## Технологии
+
+- **Backend:** Python 3.12+, FastAPI
+- **База данных:** PostgreSQL 16
+- **ORM:** SQLAlchemy 2.0
+- **Асинхронность:** asyncpg, Uvicorn
+- **Аутентификация:** JWT (python-jose), passlib
+- **Валидация:** Pydantic
+- **Миграции:** Alembic
+- **Контейнеризация:** Docker, Docker Compose
+
+## Структура проекта
+
 ```
-POST /auth/register/
-```
-**Description:** Register a new user account
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "string",
-  "password_check": "string"
-}
-```
-
-**Response:**
-```json
-{
-  "message": "Successful registration"
-}
-```
-
----
-
-### Login
-```
-POST /auth/login/
-```
-**Description:** Authenticate user and receive access token
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "string"
-}
-```
-
-**Response:**
-```json
-{
-  "ok": true,
-  "access_token": "jwt_token",
-  "refresh_token": null,
-  "message": "Authorization succesfull"
-}
+.
+├── src/
+│   └── app/
+│       ├── chat/           # Модуль чатов (CRUD, модели, роутер)
+│       ├── users/          # Модуль пользователей (аутентификация, роутеры)
+│       ├── uploads/        # Модуль загрузки файлов
+│       ├── notifications/  # Модуль уведомлений
+│       ├── websocket/      # WebSocket менеджер для реального времени
+│       ├── utils/          # Утилиты (JWT, аутентификация)
+│       ├── main.py         # Точка входа приложения
+│       └── config.py       # Конфигурация
+├── tests/                  # Тесты
+├── frontend/               # Фронтенд часть
+├── docker-compose.yml      # Docker Compose конфигурация
+└── pyproject.toml          # Зависимости проекта
 ```
 
-**Cookies:** `user_access_token` (httponly)
+## Запуск проекта
 
----
+### Требования
 
-### Logout
-```
-POST /auth/logout/
-```
-**Description:** Logout user and clear access token cookie
+- Docker и Docker Compose
+- Python 3.12+ (для локальной разработки)
 
-**Response:**
-```json
-{
-  "message": "successful logout"
-}
+### Запуск через Docker Compose
+
+```bash
+docker-compose up --build
 ```
 
----
+После запуска:
+- Бэкенд доступен по адресу: `http://localhost:8000`
+- PostgreSQL: `localhost:5432`
 
-## Chats (`/chats`)
+### Локальная разработка
 
-### Get All User Chats
-```
-GET /chats/
-```
-**Description:** Get list of all chats for the current user
-
-**Authentication:** Required (cookie: `user_access_token`)
-
-**Response:** List of chat objects
-
----
-
-### Get Messages from Chat
-```
-GET /chats/{chat_id}/messages
-```
-**Description:** Get all messages from a specific chat
-
-**Authentication:** Required (cookie: `user_access_token`)
-
-**Path Parameters:**
-- `chat_id` (integer): Chat ID
-
-**Response:** List of message objects
-
----
-
-### Create Message
-```
-POST /chats/{chat_id}/messages
-```
-**Description:** Create a new message in a chat
-
-**Authentication:** Required (cookie: `user_access_token`)
-
-**Path Parameters:**
-- `chat_id` (integer): Chat ID
-
-**Request Body:**
-```json
-{
-  "recipient_id": 1,
-  "content": "Message text"
-}
+1. Установите зависимости:
+```bash
+poetry install
 ```
 
-**Response (201 Created):**
-```json
-{
-  "id": 1,
-  "sender_id": 1,
-  "recipient_id": 2,
-  "content": "Message text"
-}
+2. Настройте переменные окружения в `src/.env`
+
+3. Запустите миграции:
+```bash
+alembic upgrade head
 ```
 
-**Errors:**
-- `403 Forbidden` - User is not a participant of this chat
-- `404 Not Found` - Chat not found
-
----
-
-## WebSocket (`/chats/ws`)
-
-### Chat WebSocket Connection
-```
-WS /chats/ws/{chat_id}
-```
-**Description:** Real-time WebSocket connection for chat messages
-
-**Authentication:** Required via cookie `user_access_token` or query param `?token=<jwt_token>`
-
-**Path Parameters:**
-- `chat_id` (integer): Chat ID
-
-**Client → Server Message:**
-```json
-{
-  "content": "Message text"
-}
+4. Запустите сервер:
+```bash
+uvicorn src.app.main:app --reload
 ```
 
-**Server → Client Message:**
-```json
-{
-  "type": "new_message",
-  "id": 1,
-  "sender_id": 1,
-  "content": "Message text",
-  "created_at": "2024-01-01T12:00:00"
-}
-```
+## Конфигурация
 
-**Close Codes:**
-- `4001` - Authentication failed (missing/invalid/expired token)
-- `4003` - Chat not found or user is not a participant
+Основные переменные окружения настраиваются в файле `src/.env`:
 
-**Example Connection:**
-```javascript
-const ws = new WebSocket('ws://localhost:8000/chats/ws/1?token=YOUR_JWT_TOKEN');
+- `POSTGRES_USER` — пользователь базы данных
+- `POSTGRES_PASSWORD` — пароль базы данных
+- `POSTGRES_DB` — имя базы данных
+- `SECRET_KEY` — секретный ключ для JWT
 
-ws.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-  console.log('New message:', message);
-};
+## Особенности архитектуры
 
-// Send a message
-ws.send(JSON.stringify({ content: 'Hello!' }));
-```
+- **Асинхронная архитектура** — все операции с БД и WebSocket работают асинхронно
+- **JWT аутентификация** — токены передаются через httponly cookies
+- **Real-time общение** — WebSocket соединения для мгновенной доставки сообщений
+- **Модульная структура** — разделение на независимые модули (users, chat, uploads, notifications)
 
----
+## Лицензия
 
-## Root
-
-### Redirect to Auth
-```
-GET /
-```
-**Description:** Redirects to `/auth`
-
----
-
-## Notes
-
-- All authenticated endpoints require a valid JWT token in the `user_access_token` cookie
-- Token expiration and missing token errors return `401 Unauthorized` for API requests
-- Base URL: `http://localhost:8000` (default FastAPI port)
+Проект разработан в рамках учебного/личного проекта.
