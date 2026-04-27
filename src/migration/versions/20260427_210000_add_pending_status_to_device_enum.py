@@ -9,19 +9,25 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = '20260427_210000_add_pending_status_to_device_enum'
-down_revision = '20260427_200000_add_updated_at_to_user_devices'
+down_revision = '8afb026fc2bb'
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
-    # Add PENDING value to the devicestatus enum
-    # PostgreSQL doesn't support IF NOT EXISTS for ADD VALUE before v12, so we handle it manually
-    try:
-        op.execute("ALTER TYPE devicestatus ADD VALUE 'pending'")
-    except Exception:
-        # Value might already exist, ignore error
-        pass
+    # Add PENDING value to the devicestatus enum if it doesn't exist
+    # Using a DO block to check existence before adding
+    op.execute("""
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_enum 
+                WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = 'devicestatus')
+                AND enumlabel = 'pending'
+            ) THEN
+                ALTER TYPE devicestatus ADD VALUE 'pending';
+            END IF;
+        END $$;
+    """)
 
 
 def downgrade():
