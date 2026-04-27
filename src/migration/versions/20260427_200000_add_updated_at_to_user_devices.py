@@ -20,8 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Add updated_at column to user_devices table
-    op.add_column("user_devices", sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False))
-
+    pass
 
 def downgrade() -> None:
     op.drop_column("user_devices", "updated_at")

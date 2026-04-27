@@ -313,7 +313,7 @@ async def get_user_device_by_pairing_token(db: AsyncSession, pairing_token: str)
     q = select(UserDevice).where(
         UserDevice.pairing_token == pairing_token,
         UserDevice.pairing_token_expires_at > now,
-        UserDevice.status == DeviceStatus.PENDING.value,
+        UserDevice.status == DeviceStatus.pending.value,
     )
     result = await db.execute(q)
     return result.scalars().first()
@@ -332,7 +332,7 @@ async def create_user_device(
     """Create a new user device."""
     from app.users.models import UserDevice, DeviceStatus
     if status is None:
-        status = DeviceStatus.PENDING.value
+        status = DeviceStatus.pending.value
     
     device = UserDevice(
         user_id=user_id,
@@ -352,7 +352,7 @@ async def create_user_device(
 async def activate_user_device(db: AsyncSession, device: "UserDevice") -> "UserDevice":
     """Activate a user device."""
     from app.users.models import DeviceStatus
-    device.status = DeviceStatus.ACTIVE.value
+    device.status = DeviceStatus.active.value
     device.pairing_token = None
     device.pairing_token_expires_at = None
     device.last_seen_at = datetime.now()
@@ -375,7 +375,7 @@ async def update_device_last_seen(db: AsyncSession, device_id: str) -> Optional[
 async def revoke_user_device(db: AsyncSession, device: "UserDevice") -> "UserDevice":
     """Revoke a user device."""
     from app.users.models import DeviceStatus
-    device.status = DeviceStatus.REVOKED.value
+    device.status = DeviceStatus.revoked.value
     device.revoked_at = datetime.now()
     device.pairing_token = None
     device.pairing_token_expires_at = None
@@ -397,7 +397,7 @@ async def get_active_user_devices(db: AsyncSession, user_id: int) -> List["UserD
     from app.users.models import UserDevice, DeviceStatus
     q = select(UserDevice).where(
         UserDevice.user_id == user_id,
-        UserDevice.status == DeviceStatus.ACTIVE.value,
+        UserDevice.status == DeviceStatus.active.value,
     ).order_by(UserDevice.created_at.desc())
     result = await db.execute(q)
     return result.scalars().all()

@@ -82,9 +82,9 @@ class UserPublicKey(Base):
 
 
 class DeviceStatus(str, enum.Enum):
-    PENDING = "pending"  # Device registered but not yet verified via QR
-    ACTIVE = "active"    # Device verified and active
-    REVOKED = "revoked"  # Device revoked by user
+    pending = "pending"  # Device registered but not yet verified via QR
+    active = "active"    # Device verified and active
+    revoked = "revoked"  # Device revoked by user
 
 
 class UserDevice(Base):
@@ -102,7 +102,7 @@ class UserDevice(Base):
     
     # Status and timestamps
     status: Mapped[DeviceStatus] = mapped_column(
-        Enum(DeviceStatus), default=DeviceStatus.PENDING, nullable=False
+        Enum(DeviceStatus), default=DeviceStatus.pending, nullable=False
     )
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
