@@ -1,7 +1,7 @@
 // Device Management Functions for Multi-device Support
 
-// API Configuration - must match app.js
-const API_BASE_URL = typeof window.API_BASE_URL !== 'undefined' ? window.API_BASE_URL : '';
+// API Configuration - use global API_BASE_URL from app.js
+// No need to redeclare, just use the global variable
 
 // DOM Elements for device management (lazy initialization)
 let _devicesElements = null;
