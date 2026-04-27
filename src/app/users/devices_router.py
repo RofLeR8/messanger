@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from typing import List
 
-router = APIRouter(prefix="/devices", tags=["devices"])
+router = APIRouter(prefix="/users/me/devices", tags=["devices"])
 
 
 @router.get("/", response_model=List[SUserDeviceRead])
