@@ -1,5 +1,34 @@
 // Device Management Functions for Multi-device Support
 
+// API Configuration - must match app.js
+const API_BASE_URL = typeof window.API_BASE_URL !== 'undefined' ? window.API_BASE_URL : '';
+
+// DOM Elements for device management (lazy initialization)
+let _devicesElements = null;
+
+function getDevicesElements() {
+    if (_devicesElements) return _devicesElements;
+    
+    _devicesElements = {
+        devicesList: document.getElementById('devices-list'),
+        addDeviceBtn: document.getElementById('add-device-btn'),
+        qrModal: document.getElementById('qr-modal'),
+        closeQrBtn: document.getElementById('close-qr-btn'),
+        qrCodeContainer: document.getElementById('qr-code-container'),
+        pairingTokenText: document.getElementById('pairing-token-text'),
+        expiresCountdown: document.getElementById('expires-countdown'),
+        refreshQrBtn: document.getElementById('refresh-qr-btn'),
+        scanQrModal: document.getElementById('scan-qr-modal'),
+        closeScanQrBtn: document.getElementById('close-scan-qr-btn'),
+        pairingTokenForm: document.getElementById('pairing-token-form'),
+        pairingTokenInput: document.getElementById('pairing-token-input'),
+        pairingSuccess: document.getElementById('pairing-success'),
+        pairingError: document.getElementById('pairing-error'),
+    };
+    
+    return _devicesElements;
+}
+
 // Generate a unique device ID for this browser/device
 function generateDeviceId() {
     const stored = localStorage.getItem('deviceId');
@@ -170,7 +199,11 @@ async function refreshDevice(deviceId) {
 
 // Render devices list in settings
 async function renderDevicesList() {
-    if (!devicesList) return;
+    const { devicesList } = getDevicesElements();
+    if (!devicesList) {
+        console.warn('devicesList element not found');
+        return;
+    }
     
     devicesList.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">Loading...</p>';
     
@@ -247,7 +280,13 @@ let qrRefreshInterval = null;
 let currentPairingExpiresAt = null;
 
 async function showAddDeviceModal() {
-    if (!qrModal) return;
+    const elements = getDevicesElements();
+    const { qrModal, pairingError, pairingSuccess, pairingTokenText } = elements;
+    
+    if (!qrModal) {
+        console.error('QR modal element not found');
+        return;
+    }
     
     hideElement(pairingError);
     hideElement(pairingSuccess);
@@ -263,13 +302,13 @@ async function showAddDeviceModal() {
         const pairingData = await initiateDevicePairing(device.device_id);
         
         // Display QR code
-        displayQRCode(pairingData.pairing_token);
+        displayQRCode(pairingData.pairing_token, elements);
         pairingTokenText.textContent = pairingData.pairing_token;
         
         // Set up countdown timer
         currentPairingExpiresAt = new Date(pairingData.expires_at);
-        updateCountdown();
-        qrRefreshInterval = setInterval(updateCountdown, 1000);
+        updateCountdown(elements);
+        qrRefreshInterval = setInterval(() => updateCountdown(elements), 1000);
         
         showElement(qrModal);
     } catch (error) {
@@ -317,8 +356,12 @@ function arrayBufferToBase64(buffer) {
 }
 
 // Display QR code using a simple library or canvas
-function displayQRCode(token) {
-    if (!qrCodeContainer) return;
+function displayQRCode(token, elements = null) {
+    const { qrCodeContainer } = elements || getDevicesElements();
+    if (!qrCodeContainer) {
+        console.warn('qrCodeContainer element not found');
+        return;
+    }
     
     // Use a QR code library or create a simple representation
     // For now, we'll use a placeholder - in production, use qrcode.js or similar
@@ -331,7 +374,8 @@ function displayQRCode(token) {
 }
 
 // Update countdown timer
-function updateCountdown() {
+function updateCountdown(elements = null) {
+    const { expiresCountdown } = elements || getDevicesElements();
     if (!currentPairingExpiresAt || !expiresCountdown) return;
     
     const now = new Date();
@@ -365,6 +409,7 @@ window.handleRevokeDevice = async function(deviceId) {
 
 // Close QR modal
 function closeQrModalHandler() {
+    const { qrModal } = getDevicesElements();
     hideElement(qrModal);
     if (qrRefreshInterval) {
         clearInterval(qrRefreshInterval);
@@ -374,17 +419,19 @@ function closeQrModalHandler() {
 
 // Refresh QR code
 async function refreshQRCode() {
+    const elements = getDevicesElements();
+    const { pairingError } = elements;
     hideElement(pairingError);
     
     try {
         const deviceId = generateDeviceId();
         const pairingData = await initiateDevicePairing(deviceId);
         
-        displayQRCode(pairingData.pairing_token);
-        pairingTokenText.textContent = pairingData.pairing_token;
+        displayQRCode(pairingData.pairing_token, elements);
+        elements.pairingTokenText.textContent = pairingData.pairing_token;
         
         currentPairingExpiresAt = new Date(pairingData.expires_at);
-        updateCountdown();
+        updateCountdown(elements);
     } catch (error) {
         showModalError(pairingError, error.message);
     }
@@ -393,6 +440,9 @@ async function refreshQRCode() {
 // Handle pairing token form submission (for new device linking)
 async function handlePairingTokenSubmit(e) {
     e.preventDefault();
+    const elements = getDevicesElements();
+    const { pairingError, pairingSuccess, pairingTokenInput, pairingTokenForm, scanQrModal } = elements;
+    
     hideElement(pairingError);
     hideElement(pairingSuccess);
     
@@ -439,23 +489,34 @@ async function initializeDeviceManagement() {
 
 // Setup event listeners for device management
 function setupDeviceEventListeners() {
+    // Check if elements exist before adding listeners
     if (addDeviceBtn) {
         addDeviceBtn.addEventListener('click', showAddDeviceModal);
+    } else {
+        console.warn('addDeviceBtn not found in DOM');
     }
     
     if (closeQrBtn) {
         closeQrBtn.addEventListener('click', closeQrModalHandler);
+    } else {
+        console.warn('closeQrBtn not found in DOM');
     }
     
     if (refreshQrBtn) {
         refreshQrBtn.addEventListener('click', refreshQRCode);
+    } else {
+        console.warn('refreshQrBtn not found in DOM');
     }
     
     if (closeScanQrBtn) {
         closeScanQrBtn.addEventListener('click', () => hideElement(scanQrModal));
+    } else {
+        console.warn('closeScanQrBtn not found in DOM');
     }
     
     if (pairingTokenForm) {
         pairingTokenForm.addEventListener('submit', handlePairingTokenSubmit);
+    } else {
+        console.warn('pairingTokenForm not found in DOM');
     }
 }

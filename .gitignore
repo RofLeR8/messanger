@@ -1,49 +1,48 @@
 ```
-# Python
+# Dependencies
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-env/
-venv/
-.venv/
-.ENV
-.venv.bak/
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
 .pytest_cache/
 .mypy_cache/
-.hypothesis/
+.venv/
+venv/
+env/
+node_modules/
 
-# Databases
-*.sqlite
-*.sqlite3
-.dynamodb/
+# Build artifacts
+dist/
+build/
+target/
+.coverage
+coverage/
+htmlcov/
 
-# Migration files
-src/migration/versions/*.py
+# Logs
+*.log
 
-# Environment
+# Environment variables
 .env
 .env.local
 .env.*
-!.env.example
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # OS generated files
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
+
+# Compiled files
+*.class
+*.o
+*.so
+*.dll
+*.exe
+*.out
+*.a
 ```

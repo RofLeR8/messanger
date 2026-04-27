@@ -99,21 +99,40 @@ const filePreviewName = filePreview?.querySelector('.file-preview-name');
 const cancelFileBtn = document.getElementById('cancel-file-btn');
 const attachFileBtn = document.getElementById('attach-file-btn');
 
-// Devices management
-const devicesList = document.getElementById('devices-list');
-const addDeviceBtn = document.getElementById('add-device-btn');
-const qrModal = document.getElementById('qr-modal');
-const closeQrBtn = document.getElementById('close-qr-btn');
-const qrCodeContainer = document.getElementById('qr-code-container');
-const pairingTokenText = document.getElementById('pairing-token-text');
-const expiresCountdown = document.getElementById('expires-countdown');
-const refreshQrBtn = document.getElementById('refresh-qr-btn');
-const scanQrModal = document.getElementById('scan-qr-modal');
-const closeScanQrBtn = document.getElementById('close-scan-qr-btn');
-const pairingTokenForm = document.getElementById('pairing-token-form');
-const pairingTokenInput = document.getElementById('pairing-token-input');
-const pairingSuccess = document.getElementById('pairing-success');
-const pairingError = document.getElementById('pairing-error');
+// Devices management - elements are now managed in devices.js via getDevicesElements()
+// These references are kept for backward compatibility but may be null if elements don't exist yet
+let devicesList = null;
+let addDeviceBtn = null;
+let qrModal = null;
+let closeQrBtn = null;
+let qrCodeContainer = null;
+let pairingTokenText = null;
+let expiresCountdown = null;
+let refreshQrBtn = null;
+let scanQrModal = null;
+let closeScanQrBtn = null;
+let pairingTokenForm = null;
+let pairingTokenInput = null;
+let pairingSuccess = null;
+let pairingError = null;
+
+// Initialize device elements when DOM is ready
+function initDeviceElements() {
+    devicesList = document.getElementById('devices-list');
+    addDeviceBtn = document.getElementById('add-device-btn');
+    qrModal = document.getElementById('qr-modal');
+    closeQrBtn = document.getElementById('close-qr-btn');
+    qrCodeContainer = document.getElementById('qr-code-container');
+    pairingTokenText = document.getElementById('pairing-token-text');
+    expiresCountdown = document.getElementById('expires-countdown');
+    refreshQrBtn = document.getElementById('refresh-qr-btn');
+    scanQrModal = document.getElementById('scan-qr-modal');
+    closeScanQrBtn = document.getElementById('close-scan-qr-btn');
+    pairingTokenForm = document.getElementById('pairing-token-form');
+    pairingTokenInput = document.getElementById('pairing-token-input');
+    pairingSuccess = document.getElementById('pairing-success');
+    pairingError = document.getElementById('pairing-error');
+}
 
 // Pages
 const chatsPage = document.getElementById('chats-page');
@@ -859,6 +878,11 @@ function switchToTab(tab) {
 
     if (tab === 'friends') {
         loadFriendsPage();
+    } else if (tab === 'settings') {
+        // Render devices list when opening settings
+        if (typeof renderDevicesList === 'function') {
+            renderDevicesList();
+        }
     }
 }
 
@@ -3022,6 +3046,7 @@ if (avatarUploadInput) {
 // ==================== Logout update ====================
 window.addEventListener('DOMContentLoaded', async () => {
     initUiScaleSettings();
+    initDeviceElements(); // Initialize device management elements
     const savedToken = localStorage.getItem('authToken');
     if (savedToken) {
         authToken = savedToken;
@@ -3044,6 +3069,14 @@ window.addEventListener('DOMContentLoaded', async () => {
             showChatSection();
             loadChats();
             connectNotificationWebSocket();
+            
+            // Initialize device management after successful login
+            if (typeof initializeDeviceManagement === 'function') {
+                initializeDeviceManagement();
+            }
+            if (typeof setupDeviceEventListeners === 'function') {
+                setupDeviceEventListeners();
+            }
         }
     }
 
