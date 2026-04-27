@@ -53,7 +53,8 @@ async def register_device(
 ):
     """
     Register a new device for the current user.
-    Device starts in PENDING status and must be activated via QR pairing.
+    If this is the first device for the user, it becomes active immediately.
+    Otherwise, device starts in PENDING status and must be activated via QR pairing.
     """
     # Check if device already exists
     existing = await get_user_device_by_id(db, device_data.device_id)
@@ -63,10 +64,20 @@ async def register_device(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Device ID already registered to another user"
             )
-        # Return existing device
+        # Return existing device (even if active, just return it)
         return existing
     
-    # Create new device in PENDING status
+    # Check if user has any devices (active or pending)
+    all_user_devices = await get_user_devices(db, user.id)
+    
+    # If this is the first device ever, activate it immediately
+    if len(all_user_devices) == 0:
+        status_value = DeviceStatus.active.value
+    else:
+        # Otherwise, create in PENDING status for QR pairing
+        status_value = DeviceStatus.pending.value
+    
+    # Create new device
     device = await create_user_device(
         db=db,
         user_id=user.id,
@@ -75,7 +86,7 @@ async def register_device(
         device_type=device_data.device_type,
         device_public_key=device_data.device_public_key,
         algorithm=device_data.algorithm,
-        status=DeviceStatus.pending.value,
+        status=status_value,
     )
     return device
 
