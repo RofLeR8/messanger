@@ -74,7 +74,7 @@ async def register_device(
         device_type=device_data.device_type,
         device_public_key=device_data.device_public_key,
         algorithm=device_data.algorithm,
-        status=DeviceStatus.PENDING,
+        status=DeviceStatus.PENDING.value,
     )
     return device
 
@@ -104,10 +104,10 @@ async def init_device_pairing(
             detail="Cannot initiate pairing for device owned by another user"
         )
     
-    if device.status != DeviceStatus.PENDING:
+    if device.status != DeviceStatus.PENDING.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Device is already {device.status.value}. Only pending devices can be paired."
+            detail=f"Device is already {device.status}. Only pending devices can be paired."
         )
     
     # Generate pairing token
@@ -141,7 +141,7 @@ async def confirm_device_pairing(
     # Update the device with the public key from the new device
     target_device.device_public_key = pairing_data.device_public_key
     target_device.algorithm = pairing_data.algorithm
-    target_device.status = DeviceStatus.ACTIVE
+    target_device.status = DeviceStatus.ACTIVE.value
     target_device.pairing_token = None
     target_device.pairing_token_expires_at = None
     target_device.last_seen_at = target_device.created_at
