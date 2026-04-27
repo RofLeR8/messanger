@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String, Boolean, DateTime, ForeignKey, Text, Enum, LargeBinary
+from sqlalchemy import Integer, String, Boolean, DateTime, ForeignKey, Text, Enum, LargeBinary, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 from datetime import datetime, timedelta
@@ -111,6 +111,9 @@ class UserDevice(Base):
     # QR code pairing support
     pairing_token: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
     pairing_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    
+    # Override updated_at to not inherit from Base (will be added in future migration)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="devices", lazy="select")
