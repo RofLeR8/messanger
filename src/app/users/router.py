@@ -50,7 +50,9 @@ async def register_user(user_data: SUserRegister, db: AsyncSession = Depends(get
             status=DeviceStatus.active.value,
         )
         # Create access token for the newly registered device
-        access_token = create_access_token({"sub": str(user.id)})
+        # Explicitly get user_id before creating token to avoid lazy loading
+        user_id = user.id
+        access_token = create_access_token({"sub": str(user_id)})
     
     return {
         "message": "Successful registration",

@@ -159,8 +159,10 @@ async def confirm_device_pairing(
     await db.refresh(target_device)
     
     # Create an access token for the new device
+    # Explicitly get user_id before creating token to avoid lazy loading
     from app.users.auth import create_access_token
-    access_token = create_access_token({"sub": str(user.id)})
+    user_id = user.id
+    access_token = create_access_token({"sub": str(user_id)})
     
     # TODO: Trigger re-wrapping of chat keys for this user on all their other devices
     # This would notify other devices to encrypt chat keys for the new device
