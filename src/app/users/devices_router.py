@@ -9,6 +9,7 @@ from app.users.crud import (
     get_user_device_by_id,
     get_user_device_by_pairing_token,
     generate_pairing_token_for_device,
+    get_one_by_id_or_none,
 )
 from app.users.models import User, DeviceStatus
 from app.users.schemas import (
@@ -120,15 +121,15 @@ async def init_device_pairing(
     }
 
 
-@router.post("/pairing/confirm", response_model=SUserDeviceRead)
+@router.post("/pairing/confirm")
 async def confirm_device_pairing(
     pairing_data: SUserDevicePairingConfirm,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
 ):
     """
     Confirm device pairing using a pairing token from QR code.
     This endpoint is called by the NEW device being added.
+    Does NOT require authentication - the pairing token is the authentication.
     """
     # Find the pending device with valid pairing token
     target_device = await get_user_device_by_pairing_token(db, pairing_data.pairing_token)
@@ -136,6 +137,14 @@ async def confirm_device_pairing(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired pairing token"
+        )
+    
+    # Get the user who owns this device
+    user = await get_one_by_id_or_none(db, target_device.user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
         )
     
     # Update the device with the public key from the new device
@@ -149,10 +158,23 @@ async def confirm_device_pairing(
     await db.commit()
     await db.refresh(target_device)
     
+    # Create an access token for the new device
+    from app.users.auth import create_access_token
+    access_token = create_access_token({"sub": str(user.id)})
+    
     # TODO: Trigger re-wrapping of chat keys for this user on all their other devices
     # This would notify other devices to encrypt chat keys for the new device
     
-    return target_device
+    return {
+        "device": target_device,
+        "access_token": access_token,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "username": user.username,
+        }
+    }
 
 
 @router.delete("/{device_id}")
