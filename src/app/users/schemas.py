@@ -10,6 +10,12 @@ class SUserRegister(BaseModel):
     password_check: str = Field(..., max_length=30, min_length=5)
     name: str = Field(..., max_length=30)
     username: Optional[str] = Field(None, max_length=30)
+    # Device registration fields (optional)
+    device_id: Optional[str] = Field(None, max_length=128)
+    device_name: Optional[str] = Field(None, max_length=128)
+    device_type: Optional[str] = Field(None, max_length=64)
+    device_public_key: Optional[str] = Field(None, min_length=1)
+    algorithm: Optional[str] = Field("RSA-OAEP", max_length=64)
 
 
 class SUserAuth(BaseModel):

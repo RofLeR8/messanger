@@ -1142,10 +1142,27 @@ async function login(email, password) {
 }
 
 async function register(email, name, username, password, passwordCheck) {
+    // Generate device key pair for registration
+    const keyPair = await generateDeviceKeyPair();
+    const deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const deviceName = navigator.userAgent.includes('Mobile') ? 'Mobile Device' : 'Desktop Device';
+    const deviceType = navigator.userAgent.includes('Mobile') ? 'mobile' : 'web';
+    
     const response = await fetch(`${API_BASE_URL}/auth/register/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name, username: username || null, password, password_check: passwordCheck }),
+        body: JSON.stringify({ 
+            email, 
+            name, 
+            username: username || null, 
+            password, 
+            password_check: passwordCheck,
+            device_id: deviceId,
+            device_name: deviceName,
+            device_type: deviceType,
+            device_public_key: keyPair.publicKey,
+            algorithm: 'RSA-OAEP'
+        }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Registration failed');
@@ -1168,6 +1185,85 @@ async function logout() {
         currentActiveTab = 'chats';
         currentFriendsTab = 'all';
     }
+}
+
+// ==================== Device Pairing Functions ====================
+async function generateDeviceKeyPair() {
+    // Generate RSA key pair for the device
+    const keyPair = await window.crypto.subtle.generateKey(
+        {
+            name: 'RSA-OAEP',
+            modulusLength: 2048,
+            publicExponent: new Uint8Array([1, 0, 1]),
+            hash: 'SHA-256',
+        },
+        true,
+        ['encrypt', 'decrypt']
+    );
+    
+    // Export public key
+    const exportedPublicKey = await window.crypto.subtle.exportKey('spki', keyPair.publicKey);
+    const publicKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(exportedPublicKey)));
+    
+    return {
+        publicKey: publicKeyBase64,
+        keyPair: keyPair
+    };
+}
+
+async function confirmDevicePairing(pairingToken, devicePublicKey) {
+    const response = await fetch(`${API_BASE_URL}/users/me/devices/pairing/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            pairing_token: pairingToken,
+            device_public_key: devicePublicKey,
+            algorithm: 'RSA-OAEP'
+        }),
+    });
+    
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(data.detail || 'Failed to confirm device pairing');
+    }
+    
+    return data;
+}
+
+async function initDevicePairing(deviceId) {
+    const response = await fetch(`${API_BASE_URL}/users/me/devices/pairing/init`, {
+        method: 'POST',
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ device_id: deviceId }),
+    });
+    
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(data.detail || 'Failed to initiate device pairing');
+    }
+    
+    return data;
+}
+
+async function registerDevice(deviceData) {
+    const response = await fetch(`${API_BASE_URL}/users/me/devices/register`, {
+        method: 'POST',
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify(deviceData),
+    });
+    
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(data.detail || 'Failed to register device');
+    }
+    
+    return data;
 }
 
 async function handleUnauthorizedSession() {
@@ -2676,12 +2772,12 @@ if (showLinkFromLoginBtn) {
     });
 }
 
-// Link device form submission
+// Link device form submission - for QR code login on new device
 linkDeviceForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const token = linkTokenInput.value.trim();
     if (!token) {
-        showModalError(linkDeviceError, 'Please enter a pairing token');
+        showModalError(linkDeviceError, 'Please enter a pairing token or scan QR code');
         return;
     }
     
@@ -2690,7 +2786,13 @@ linkDeviceForm.addEventListener('submit', async (e) => {
         const keyPair = await generateDeviceKeyPair();
         
         // Confirm pairing using the token from existing device
-        await confirmDevicePairing(token, keyPair.publicKey);
+        const result = await confirmDevicePairing(token, keyPair.publicKey);
+        
+        // Store the auth token and user info from the response
+        authToken = result.access_token;
+        localStorage.setItem('authToken', authToken);
+        currentUserId = result.user.id;
+        localStorage.setItem('currentUserId', currentUserId);
         
         showElement(linkDeviceSuccess);
         hideElement(linkDeviceError);
@@ -2698,7 +2800,11 @@ linkDeviceForm.addEventListener('submit', async (e) => {
             hideElement(linkDeviceSuccess);
             linkDeviceForm.reset();
             hideElement(linkDeviceForm);
-            showElement(loginForm);
+            
+            // Navigate to chat section directly - user is now logged in
+            showChatSection();
+            loadChats();
+            connectNotificationWebSocket();
         }, 2000);
     } catch (error) {
         showModalError(linkDeviceError, error.message);
@@ -2709,7 +2815,12 @@ loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = document.getElementById('login-email').value;
     const password = document.getElementById('login-password').value;
-    try { await login(email, password); showChatSection(); await loadChats(); }
+    try { 
+        await login(email, password); 
+        showChatSection(); 
+        await loadChats();
+        connectNotificationWebSocket();
+    }
     catch (error) { showError(error.message); }
 });
 
@@ -2721,9 +2832,21 @@ registerForm.addEventListener('submit', async (e) => {
     const password = document.getElementById('register-password').value;
     const passwordCheck = document.getElementById('register-password-check').value;
     try {
-        await register(email, name, username, password, passwordCheck);
-        hideElement(registerForm); showElement(loginForm);
-        document.getElementById('login-email').value = email;
+        const result = await register(email, name, username, password, passwordCheck);
+        // If registration returned access_token, auto-login
+        if (result && result.access_token) {
+            authToken = result.access_token;
+            localStorage.setItem('authToken', authToken);
+            currentUserId = result.user.id;
+            localStorage.setItem('currentUserId', currentUserId);
+            showChatSection();
+            await loadChats();
+            connectNotificationWebSocket();
+        } else {
+            hideElement(registerForm); 
+            showElement(loginForm);
+            document.getElementById('login-email').value = email;
+        }
     } catch (error) { showError(error.message); }
 });
 

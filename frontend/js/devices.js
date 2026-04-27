@@ -133,11 +133,12 @@ async function initiateDevicePairing(deviceId) {
 }
 
 // API: Confirm pairing with token (for new device)
+// This endpoint does NOT require authentication - the pairing token is the authentication
 async function confirmDevicePairing(pairingToken, devicePublicKey, algorithm = 'RSA-OAEP') {
     try {
         const response = await fetch(`${API_BASE_URL}/users/me/devices/pairing/confirm`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 pairing_token: pairingToken,
                 device_public_key: devicePublicKey,
@@ -437,7 +438,7 @@ async function refreshQRCode() {
     }
 }
 
-// Handle pairing token form submission (for new device linking)
+// Handle pairing token form submission (for new device linking via QR scan)
 async function handlePairingTokenSubmit(e) {
     e.preventDefault();
     const elements = getDevicesElements();
@@ -456,14 +457,39 @@ async function handlePairingTokenSubmit(e) {
         // Generate keys for this new device
         const keyPair = await generateDeviceKeyPair();
         
-        // Confirm pairing
-        await confirmDevicePairing(token, keyPair.publicKey);
+        // Confirm pairing - this endpoint does NOT require auth token
+        const response = await fetch(`${API_BASE_URL}/users/me/devices/pairing/confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                pairing_token: token,
+                device_public_key: keyPair.publicKey,
+                algorithm: 'RSA-OAEP',
+            }),
+        });
+        
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || 'Failed to confirm pairing');
+        }
+        
+        const result = await response.json();
+        
+        // Store the auth token and user info from the response
+        authToken = result.access_token;
+        localStorage.setItem('authToken', authToken);
+        currentUserId = result.user.id;
+        localStorage.setItem('currentUserId', currentUserId);
         
         showElement(pairingSuccess);
         setTimeout(() => {
             hideElement(scanQrModal);
             pairingTokenForm.reset();
             hideElement(pairingSuccess);
+            
+            // Navigate to chat section
+            showChatSection();
+            loadChats();
         }, 2000);
     } catch (error) {
         showModalError(pairingError, error.message);
