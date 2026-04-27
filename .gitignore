@@ -1,81 +1,42 @@
-```
-# Compiled and build artifacts
+```python
+# Compiled Python files
 *.pyc
 __pycache__/
-*.o
-*.obj
-*.so
-*.dll
-*.exe
-*.class
-*.out
 
 # Dependencies
 .venv/
 venv/
 node_modules/
-pip-wheel-metadata/
-*.egg-info/
-
-# Build directories
-build/
-dist/
-target/
-*.egg
 
 # Logs and temp files
 *.log
 *.tmp
 *.swp
-*.swo
 
-# Environment variables
+# Environment files
 .env
 .env.local
-.env.*
+*.env.*
 
 # Editors
 .vscode/
 .idea/
-*.sublime-project
-*.sublime-workspace
 
-# OS generated files
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+target/
+
+# Python cache
+.mypy_cache/
+.pytest_cache/
+
+# System files
 .DS_Store
 Thumbs.db
-
-# Testing
-.coverage
-htmlcov/
-.coverage.*
-.cache
-.pytest_cache/
-.mypy_cache/
-
-# Distribution / packaging
-*.tar.gz
-*.whl
-*.zip
-
-# Python
-*.py[cod]
-*$py.class
-*$pyc.class
-*.so
-.Python
-build/
-develop-eggs/
-.installed.cfg
-.lib/
-.libs/
-.eggs/
-.eggs/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-lib/
-lib64/
 ```
