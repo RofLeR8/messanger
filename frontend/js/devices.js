@@ -520,3 +520,7 @@ function setupDeviceEventListeners() {
         console.warn('pairingTokenForm not found in DOM');
     }
 }
+
+// Export functions for use in app.js
+window.confirmDevicePairing = confirmDevicePairing;
+window.generateDeviceKeyPair = generateDeviceKeyPair;
