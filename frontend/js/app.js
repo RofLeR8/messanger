@@ -99,6 +99,22 @@ const filePreviewName = filePreview?.querySelector('.file-preview-name');
 const cancelFileBtn = document.getElementById('cancel-file-btn');
 const attachFileBtn = document.getElementById('attach-file-btn');
 
+// Devices management
+const devicesList = document.getElementById('devices-list');
+const addDeviceBtn = document.getElementById('add-device-btn');
+const qrModal = document.getElementById('qr-modal');
+const closeQrBtn = document.getElementById('close-qr-btn');
+const qrCodeContainer = document.getElementById('qr-code-container');
+const pairingTokenText = document.getElementById('pairing-token-text');
+const expiresCountdown = document.getElementById('expires-countdown');
+const refreshQrBtn = document.getElementById('refresh-qr-btn');
+const scanQrModal = document.getElementById('scan-qr-modal');
+const closeScanQrBtn = document.getElementById('close-scan-qr-btn');
+const pairingTokenForm = document.getElementById('pairing-token-form');
+const pairingTokenInput = document.getElementById('pairing-token-input');
+const pairingSuccess = document.getElementById('pairing-success');
+const pairingError = document.getElementById('pairing-error');
+
 // Pages
 const chatsPage = document.getElementById('chats-page');
 const chatPage = document.getElementById('chat-page');

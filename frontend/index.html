@@ -196,6 +196,22 @@
                             </select>
                         </div>
                     </div>
+                    
+                    <!-- Devices Section -->
+                    <div class="settings-card">
+                        <h3 class="settings-card-title">Devices</h3>
+                        <p class="settings-card-description">Manage your trusted devices for end-to-end encryption.</p>
+                        <div class="devices-list" id="devices-list">
+                            <!-- Devices will be loaded here -->
+                        </div>
+                        <button id="add-device-btn" class="btn btn-primary btn-full" style="margin-top: 1rem;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                            Add New Device
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -522,6 +538,64 @@
                 <div class="user-info-actions">
                     <button id="user-info-chat-btn" class="btn btn-primary">Start chat</button>
                     <button id="user-info-friend-btn" class="btn btn-secondary">Add friend</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- QR Code Modal for Device Pairing -->
+        <div id="qr-modal" class="modal-overlay hidden">
+            <div class="modal-box qr-modal-box">
+                <div class="modal-header">
+                    <h2>Add New Device</h2>
+                    <button id="close-qr-btn" class="btn btn-icon btn-tiny">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+                <div class="qr-content">
+                    <p class="qr-instruction">Scan this QR code with your new device to add it to your trusted devices.</p>
+                    <div id="qr-code-container" class="qr-code-container">
+                        <!-- QR code will be rendered here -->
+                    </div>
+                    <div id="pairing-token-display" class="pairing-token-display">
+                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Or enter this token manually:</p>
+                        <code id="pairing-token-text"></code>
+                    </div>
+                    <div id="pairing-expires" class="pairing-expires">
+                        Token expires in: <span id="expires-countdown">5:00</span>
+                    </div>
+                    <button id="refresh-qr-btn" class="btn btn-secondary btn-full" style="margin-top: 1rem;">
+                        Generate New QR Code
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scan QR Modal for New Device -->
+        <div id="scan-qr-modal" class="modal-overlay hidden">
+            <div class="modal-box scan-qr-modal-box">
+                <div class="modal-header">
+                    <h2>Link to Existing Account</h2>
+                    <button id="close-scan-qr-btn" class="btn btn-icon btn-tiny">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+                <div class="scan-qr-content">
+                    <p class="scan-qr-instruction">Enter the pairing token from your existing device or scan the QR code.</p>
+                    <form id="pairing-token-form" class="pairing-token-form">
+                        <div class="form-group">
+                            <label for="pairing-token-input">Pairing Token</label>
+                            <input type="text" id="pairing-token-input" required placeholder="Enter pairing token">
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-full">Link Device</button>
+                    </form>
+                    <div id="pairing-success" class="success-message hidden">Device linked successfully!</div>
+                    <div id="pairing-error" class="error-message hidden"></div>
                 </div>
             </div>
         </div>

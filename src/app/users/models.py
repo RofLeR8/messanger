@@ -1,7 +1,7 @@
-from sqlalchemy import Integer, String, Boolean, DateTime, ForeignKey, Text, Enum
+from sqlalchemy import Integer, String, Boolean, DateTime, ForeignKey, Text, Enum, LargeBinary
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 import enum
 
@@ -34,6 +34,12 @@ class User(Base):
         foreign_keys="Friendship.addressee_id",
         back_populates="addressee",
         lazy="selectin",
+    )
+    devices: Mapped[list["UserDevice"]] = relationship(
+        "UserDevice",
+        back_populates="user",
+        lazy="selectin",
+        cascade="all, delete-orphan",
     )
 
 
@@ -73,3 +79,38 @@ class UserPublicKey(Base):
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship("User", lazy="select")
+
+
+class DeviceStatus(str, enum.Enum):
+    PENDING = "pending"  # Device registered but not yet verified via QR
+    ACTIVE = "active"    # Device verified and active
+    REVOKED = "revoked"  # Device revoked by user
+
+
+class UserDevice(Base):
+    __tablename__ = "user_devices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    device_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    device_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # mobile, desktop, web
+    
+    # Device keys for E2EE
+    device_public_key: Mapped[str] = mapped_column(Text, nullable=False)
+    algorithm: Mapped[str] = mapped_column(String(64), nullable=False, default="RSA-OAEP")
+    
+    # Status and timestamps
+    status: Mapped[DeviceStatus] = mapped_column(
+        Enum(DeviceStatus), default=DeviceStatus.PENDING, nullable=False
+    )
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    
+    # QR code pairing support
+    pairing_token: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    pairing_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="devices", lazy="select")

@@ -9,6 +9,7 @@ from starlette.requests import Request
 from app.users.router import router as user_router
 from app.chat.router import router as chat_router
 from app.users.users_router import router as users_router
+from app.users.devices_router import router as devices_router
 from app.uploads.router import router as uploads_router
 from app.notifications.router import router as notifications_router
 from app.websocket.manager import manager
@@ -136,6 +137,7 @@ app.add_middleware(
 
 app.include_router(user_router)
 app.include_router(users_router)
+app.include_router(devices_router)
 app.include_router(chat_router)
 app.include_router(uploads_router)
 app.include_router(notifications_router)

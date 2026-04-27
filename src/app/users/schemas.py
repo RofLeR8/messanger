@@ -84,3 +84,43 @@ class SUserPublicKeyRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SDeviceStatusEnum(str, Enum):
+    pending = "pending"
+    active = "active"
+    revoked = "revoked"
+
+
+class SUserDeviceRegister(BaseModel):
+    device_id: str = Field(..., min_length=1, max_length=128)
+    device_name: Optional[str] = Field(None, max_length=128)
+    device_type: Optional[str] = Field(None, max_length=64)
+    device_public_key: str = Field(..., min_length=1)
+    algorithm: str = Field(default="RSA-OAEP", min_length=1, max_length=64)
+
+
+class SUserDeviceRead(BaseModel):
+    id: int
+    user_id: int
+    device_id: str
+    device_name: Optional[str] = None
+    device_type: Optional[str] = None
+    algorithm: str
+    status: SDeviceStatusEnum
+    last_seen_at: Optional[datetime] = None
+    created_at: datetime
+    revoked_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SUserDevicePairingInit(BaseModel):
+    device_id: str = Field(..., min_length=1, max_length=128)
+
+
+class SUserDevicePairingConfirm(BaseModel):
+    pairing_token: str = Field(..., min_length=1)
+    device_public_key: str = Field(..., min_length=1)
+    algorithm: str = Field(default="RSA-OAEP", min_length=1, max_length=64)

@@ -295,3 +295,125 @@ async def get_sent_friend_requests(
     q = q.options(selectinload(Friendship.addressee))
     result = await db.execute(q)
     return result.scalars().all()
+
+
+# User Devices CRUD
+async def get_user_device_by_id(db: AsyncSession, device_id: str) -> Optional["UserDevice"]:
+    """Get user device by device_id."""
+    from app.users.models import UserDevice
+    q = select(UserDevice).where(UserDevice.device_id == device_id)
+    result = await db.execute(q)
+    return result.scalars().first()
+
+
+async def get_user_device_by_pairing_token(db: AsyncSession, pairing_token: str) -> Optional["UserDevice"]:
+    """Get user device by pairing token."""
+    from app.users.models import UserDevice
+    now = datetime.now()
+    q = select(UserDevice).where(
+        UserDevice.pairing_token == pairing_token,
+        UserDevice.pairing_token_expires_at > now,
+        UserDevice.status == DeviceStatus.PENDING,
+    )
+    result = await db.execute(q)
+    return result.scalars().first()
+
+
+async def create_user_device(
+    db: AsyncSession,
+    user_id: int,
+    device_id: str,
+    device_public_key: str,
+    algorithm: str = "RSA-OAEP",
+    device_name: Optional[str] = None,
+    device_type: Optional[str] = None,
+    status: "DeviceStatus" = None,
+) -> "UserDevice":
+    """Create a new user device."""
+    from app.users.models import UserDevice, DeviceStatus
+    if status is None:
+        status = DeviceStatus.PENDING
+    
+    device = UserDevice(
+        user_id=user_id,
+        device_id=device_id,
+        device_name=device_name,
+        device_type=device_type,
+        device_public_key=device_public_key,
+        algorithm=algorithm,
+        status=status,
+    )
+    db.add(device)
+    await db.commit()
+    await db.refresh(device)
+    return device
+
+
+async def activate_user_device(db: AsyncSession, device: "UserDevice") -> "UserDevice":
+    """Activate a user device."""
+    from app.users.models import DeviceStatus
+    device.status = DeviceStatus.ACTIVE
+    device.pairing_token = None
+    device.pairing_token_expires_at = None
+    device.last_seen_at = datetime.now()
+    await db.commit()
+    await db.refresh(device)
+    return device
+
+
+async def update_device_last_seen(db: AsyncSession, device_id: str) -> Optional["UserDevice"]:
+    """Update device last seen timestamp."""
+    from app.users.models import UserDevice
+    device = await get_user_device_by_id(db, device_id)
+    if device:
+        device.last_seen_at = datetime.now()
+        await db.commit()
+        await db.refresh(device)
+    return device
+
+
+async def revoke_user_device(db: AsyncSession, device: "UserDevice") -> "UserDevice":
+    """Revoke a user device."""
+    from app.users.models import DeviceStatus
+    device.status = DeviceStatus.REVOKED
+    device.revoked_at = datetime.now()
+    device.pairing_token = None
+    device.pairing_token_expires_at = None
+    await db.commit()
+    await db.refresh(device)
+    return device
+
+
+async def get_user_devices(db: AsyncSession, user_id: int) -> List["UserDevice"]:
+    """Get all devices for a user."""
+    from app.users.models import UserDevice
+    q = select(UserDevice).where(UserDevice.user_id == user_id).order_by(UserDevice.created_at.desc())
+    result = await db.execute(q)
+    return result.scalars().all()
+
+
+async def get_active_user_devices(db: AsyncSession, user_id: int) -> List["UserDevice"]:
+    """Get all active devices for a user."""
+    from app.users.models import UserDevice, DeviceStatus
+    q = select(UserDevice).where(
+        UserDevice.user_id == user_id,
+        UserDevice.status == DeviceStatus.ACTIVE,
+    ).order_by(UserDevice.created_at.desc())
+    result = await db.execute(q)
+    return result.scalars().all()
+
+
+async def generate_pairing_token_for_device(
+    db: AsyncSession,
+    device: "UserDevice",
+    expires_in_minutes: int = 5,
+) -> "UserDevice":
+    """Generate a pairing token for a device."""
+    import secrets
+    from datetime import timedelta
+    
+    device.pairing_token = secrets.token_urlsafe(32)
+    device.pairing_token_expires_at = datetime.now() + timedelta(minutes=expires_in_minutes)
+    await db.commit()
+    await db.refresh(device)
+    return device
