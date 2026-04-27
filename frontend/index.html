@@ -26,6 +26,7 @@
                     </div>
                     <button type="submit" class="btn btn-primary">Login</button>
                     <p class="auth-switch">Don't have an account? <a href="#" id="show-register">Register</a></p>
+                    <p class="auth-switch">Link a new device? <a href="#" id="show-link-from-login">Scan QR / Enter Token</a></p>
                 </form>
 
                 <!-- Register Form -->
@@ -53,6 +54,32 @@
                     </div>
                     <button type="submit" class="btn btn-primary">Register</button>
                     <p class="auth-switch">Already have an account? <a href="#" id="show-login">Login</a></p>
+                </form>
+
+                <!-- Link Device Form -->
+                <form id="link-device-form" class="auth-form hidden">
+                    <h2>Link Device</h2>
+                    <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">
+                        Scan the QR code from your existing device or enter the pairing token manually.
+                    </p>
+                    <button type="button" id="open-scan-qr-btn" class="btn btn-secondary btn-full" style="margin-bottom: 1rem;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 0.5rem;">
+                            <rect x="3" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="14" width="7" height="7"></rect>
+                            <rect x="3" y="14" width="7" height="7"></rect>
+                        </svg>
+                        Scan QR Code
+                    </button>
+                    <div class="form-group">
+                        <label for="link-token-input">Pairing Token</label>
+                        <input type="text" id="link-token-input" required placeholder="Enter pairing token">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Link This Device</button>
+                    <p class="auth-switch">Want to create a new account? <a href="#" id="show-register-from-link">Register</a></p>
+                    <p class="auth-switch">Already have an account on this device? <a href="#" id="show-login-from-link">Login</a></p>
+                    <div id="link-device-error" class="error-message hidden"></div>
+                    <div id="link-device-success" class="success-message hidden">Device linked successfully! You can now login.</div>
                 </form>
 
                 <div id="auth-error" class="error-message hidden"></div>

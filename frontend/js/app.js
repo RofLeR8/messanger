@@ -68,6 +68,14 @@ const registerForm = document.getElementById('register-form');
 const authError = document.getElementById('auth-error');
 const showRegisterBtn = document.getElementById('show-register');
 const showLoginBtn = document.getElementById('show-login');
+const showRegisterFromLinkBtn = document.getElementById('show-register-from-link');
+const showLoginFromLinkBtn = document.getElementById('show-login-from-link');
+const showLinkFromLoginBtn = document.getElementById('show-link-from-login');
+const openScanQrBtn = document.getElementById('open-scan-qr-btn');
+const linkDeviceForm = document.getElementById('link-device-form');
+const linkTokenInput = document.getElementById('link-token-input');
+const linkDeviceError = document.getElementById('link-device-error');
+const linkDeviceSuccess = document.getElementById('link-device-success');
 const logoutBtn = document.getElementById('logout-btn');
 const chatsList = document.getElementById('chats-list');
 const createDirectChatBtn = document.getElementById('create-direct-chat-btn');
@@ -2658,6 +2666,44 @@ async function renderMemberCheckboxes() {
 // ==================== Event Listeners ====================
 showRegisterBtn.addEventListener('click', (e) => { e.preventDefault(); hideElement(loginForm); showElement(registerForm); });
 showLoginBtn.addEventListener('click', (e) => { e.preventDefault(); hideElement(registerForm); showElement(loginForm); });
+showRegisterFromLinkBtn.addEventListener('click', (e) => { e.preventDefault(); hideElement(linkDeviceForm); showElement(registerForm); });
+showLoginFromLinkBtn.addEventListener('click', (e) => { e.preventDefault(); hideElement(linkDeviceForm); showElement(loginForm); });
+if (showLinkFromLoginBtn) {
+    showLinkFromLoginBtn.addEventListener('click', (e) => { 
+        e.preventDefault(); 
+        hideElement(loginForm); 
+        showElement(linkDeviceForm); 
+    });
+}
+
+// Link device form submission
+linkDeviceForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const token = linkTokenInput.value.trim();
+    if (!token) {
+        showModalError(linkDeviceError, 'Please enter a pairing token');
+        return;
+    }
+    
+    try {
+        // Generate keys for this new device
+        const keyPair = await generateDeviceKeyPair();
+        
+        // Confirm pairing using the token from existing device
+        await confirmDevicePairing(token, keyPair.publicKey);
+        
+        showElement(linkDeviceSuccess);
+        hideElement(linkDeviceError);
+        setTimeout(() => {
+            hideElement(linkDeviceSuccess);
+            linkDeviceForm.reset();
+            hideElement(linkDeviceForm);
+            showElement(loginForm);
+        }, 2000);
+    } catch (error) {
+        showModalError(linkDeviceError, error.message);
+    }
+});
 
 loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
