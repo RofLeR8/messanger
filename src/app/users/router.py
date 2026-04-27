@@ -26,33 +26,11 @@ async def register_user(user_data: SUserRegister, db: AsyncSession = Depends(get
     
     user = await create_user(db,user_data)
     
-    # Register the current device automatically for new users
-    from app.users.crud import create_user_device
-    from app.users.models import DeviceStatus
-    from app.users.auth import create_access_token
-    import uuid
-    
-    device_id = user_data.device_id or f"device_{uuid.uuid4()}"
-    device_name = user_data.device_name or "Primary Device"
-    device_type = user_data.device_type or "web"
-    device_public_key = user_data.device_public_key
-    
-    access_token = None
-    if device_public_key:
-        device = await create_user_device(
-            db=db,
-            user_id=user.id,
-            device_id=device_id,
-            device_name=device_name,
-            device_type=device_type,
-            device_public_key=device_public_key,
-            algorithm=user_data.algorithm or "RSA-OAEP",
-            status=DeviceStatus.active.value,
-        )
-        # Create access token for the newly registered device
-        # Explicitly get user_id before creating token to avoid lazy loading
-        user_id = user.id
-        access_token = create_access_token({"sub": str(user_id)})
+    # Create access token for the newly registered user
+    # The device will be registered separately via /users/me/devices/register
+    # Explicitly get user_id before creating token to avoid lazy loading
+    user_id = user.id
+    access_token = create_access_token({"sub": str(user_id)})
     
     return {
         "message": "Successful registration",
@@ -62,7 +40,7 @@ async def register_user(user_data: SUserRegister, db: AsyncSession = Depends(get
             "email": user.email,
             "name": user.name,
             "username": user.username,
-        } if access_token else None
+        }
     }
 
 

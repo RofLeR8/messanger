@@ -1157,6 +1157,20 @@ async function register(email, name, username, password, passwordCheck) {
             username: username || null, 
             password, 
             password_check: passwordCheck,
+        }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Registration failed');
+    
+    // Now register the device with the access token we received
+    const accessToken = data.access_token;
+    const deviceResponse = await fetch(`${API_BASE_URL}/users/me/devices/register`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
             device_id: deviceId,
             device_name: deviceName,
             device_type: deviceType,
@@ -1164,9 +1178,15 @@ async function register(email, name, username, password, passwordCheck) {
             algorithm: 'RSA-OAEP'
         }),
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'Registration failed');
-    return true;
+    const deviceData = await deviceResponse.json();
+    if (!deviceResponse.ok) throw new Error(deviceData.detail || 'Device registration failed');
+    
+    // Return both user data and access token
+    return {
+        access_token: accessToken,
+        user: data.user,
+        device: deviceData
+    };
 }
 
 async function logout() {
