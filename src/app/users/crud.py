@@ -1,4 +1,4 @@
-from app.users.models import User, Friendship, FriendshipStatus, UserPublicKey
+from app.users.models import User, Friendship, FriendshipStatus, UserPublicKey, UserSession
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -7,8 +7,12 @@ from app.utils.jwt import get_password_hash
 from app.users.schemas import SUserRegister
 from sqlalchemy.exc import SQLAlchemyError
 from pydantic import EmailStr
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
+import secrets
+import hashlib
+import base64
+import os
 
 
 # Users CRUD
@@ -29,12 +33,38 @@ async def get_one_by_username_or_none(db: AsyncSession, username: str) -> Option
 
 async def create_user(db: AsyncSession, user: SUserRegister) -> User:
     hashed_password = get_password_hash(user.password)
+    
+    # Generate account encryption key if not provided
+    account_key_cipher = None
+    account_key_nonce = None
+    account_key_salt = None
+    
+    if user.account_key_cipher and user.account_key_nonce and user.account_key_salt:
+        # Client provided encrypted account key (multi-device setup)
+        account_key_cipher = user.account_key_cipher.encode() if isinstance(user.account_key_cipher, str) else user.account_key_cipher
+        account_key_nonce = user.account_key_nonce
+        account_key_salt = user.account_key_salt
+    else:
+        # Generate new account key for first-time registration
+        # Generate a random 256-bit key for chat encryption
+        account_key = os.urandom(32)
+        # Derive key from password using PBKDF2
+        account_key_salt = secrets.token_hex(16)
+        password_key = hashlib.pbkdf2_hmac('sha256', user.password.encode(), account_key_salt.encode(), 100000, 32)
+        # XOR the account key with password-derived key (simple encryption)
+        account_key_cipher = bytes(a ^ b for a, b in zip(account_key, password_key))
+        account_key_nonce = secrets.token_hex(12)
+    
     db_user = User(
         name=user.name,
         email=user.email,
         hashed_password=hashed_password,
         username=user.username,
         is_online=False,
+        # Store account encryption key if provided (for multi-device sync)
+        account_key_cipher=account_key_cipher,
+        account_key_nonce=account_key_nonce,
+        account_key_salt=account_key_salt,
     )
     db.add(db_user)
     try:
@@ -295,3 +325,141 @@ async def get_sent_friend_requests(
     q = q.options(selectinload(Friendship.addressee))
     result = await db.execute(q)
     return result.scalars().all()
+
+
+# UserSession CRUD
+async def create_user_session(
+    db: AsyncSession,
+    user_id: int,
+    device_name: Optional[str] = None,
+    device_info: Optional[str] = None,
+    expires_in_days: int = 30,
+) -> UserSession:
+    """Create a new session for a user."""
+    session_token = secrets.token_urlsafe(64)
+    expires_at = datetime.now() + timedelta(days=expires_in_days)
+    
+    session = UserSession(
+        user_id=user_id,
+        session_token=session_token,
+        device_name=device_name,
+        device_info=device_info,
+        expires_at=expires_at,
+        is_revoked=False,
+    )
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    return session
+
+
+async def get_user_session_by_token(
+    db: AsyncSession, session_token: str
+) -> Optional[UserSession]:
+    """Get a session by its token."""
+    q = select(UserSession).where(
+        UserSession.session_token == session_token,
+        UserSession.is_revoked == False,
+    )
+    result = await db.execute(q)
+    return result.scalars().first()
+
+
+async def get_user_sessions(
+    db: AsyncSession, user_id: int
+) -> List[UserSession]:
+    """Get all active sessions for a user."""
+    q = select(UserSession).where(
+        UserSession.user_id == user_id,
+        UserSession.is_revoked == False,
+    ).order_by(UserSession.created_at.desc())
+    result = await db.execute(q)
+    return result.scalars().all()
+
+
+async def revoke_user_session(
+    db: AsyncSession, session_id: int, user_id: int
+) -> bool:
+    """Revoke a specific session."""
+    session = await get_one_session_by_id(db, session_id)
+    if not session or session.user_id != user_id:
+        return False
+    
+    session.is_revoked = True
+    await db.commit()
+    return True
+
+
+async def revoke_all_user_sessions(
+    db: AsyncSession, user_id: int
+) -> int:
+    """Revoke all sessions for a user. Returns count of revoked sessions."""
+    q = select(UserSession).where(
+        UserSession.user_id == user_id,
+        UserSession.is_revoked == False,
+    )
+    result = await db.execute(q)
+    sessions = result.scalars().all()
+    
+    for session in sessions:
+        session.is_revoked = True
+    
+    await db.commit()
+    return len(sessions)
+
+
+async def update_session_last_active(
+    db: AsyncSession, session_token: str
+) -> Optional[UserSession]:
+    """Update the last_active_at timestamp for a session."""
+    session = await get_user_session_by_token(db, session_token)
+    if session:
+        session.last_active_at = datetime.now()
+        await db.commit()
+        await db.refresh(session)
+    return session
+
+
+async def get_one_session_by_id(
+    db: AsyncSession, session_id: int
+) -> Optional[UserSession]:
+    """Get a session by ID."""
+    q = select(UserSession).where(UserSession.id == session_id)
+    result = await db.execute(q)
+    return result.scalars().first()
+
+
+async def cleanup_expired_sessions(db: AsyncSession) -> int:
+    """Remove expired sessions. Returns count of deleted sessions."""
+    q = select(UserSession).where(
+        UserSession.expires_at < datetime.now(),
+    )
+    result = await db.execute(q)
+    expired_sessions = result.scalars().all()
+    
+    for session in expired_sessions:
+        await db.delete(session)
+    
+    await db.commit()
+    return len(expired_sessions)
+
+
+async def decrypt_account_key(
+    user: User, password: str
+) -> Optional[bytes]:
+    """Decrypt the account encryption key using the user's password."""
+    if not user.account_key_cipher or not user.account_key_salt:
+        return None
+    
+    # Derive key from password
+    password_key = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode(),
+        user.account_key_salt.encode(),
+        100000,
+        32
+    )
+    
+    # XOR to decrypt
+    account_key = bytes(a ^ b for a, b in zip(user.account_key_cipher, password_key))
+    return account_key

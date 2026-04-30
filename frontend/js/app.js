@@ -1080,28 +1080,140 @@ async function searchUserAndRender() {
 
 // ==================== Auth Functions ====================
 async function login(email, password) {
+    // Get device info for session
+    const deviceName = navigator.userAgent.includes('Mobile') ? 'Mobile Device' : 'Desktop';
+    const deviceInfo = navigator.userAgent;
+    
     const response = await fetch(`${API_BASE_URL}/auth/login/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ 
+            email, 
+            password,
+            device_name: deviceName,
+            device_info: deviceInfo,
+        }),
         credentials: 'include',
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Login failed');
+    
     authToken = data.access_token;
     localStorage.setItem('authToken', authToken);
+    
+    // Store account encryption key for multi-device sync
+    if (data.account_key) {
+        localStorage.setItem('accountKey', data.account_key);
+        localStorage.setItem('accountKeyNonce', data.account_key_nonce || '');
+        localStorage.setItem('accountKeySalt', data.account_key_salt || '');
+    }
+    
     return true;
 }
 
 async function register(email, name, username, password, passwordCheck) {
+    // Generate account encryption key on client side for first registration
+    const accountKey = await generateAccountKey();
+    
     const response = await fetch(`${API_BASE_URL}/auth/register/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name, username: username || null, password, password_check: passwordCheck }),
+        body: JSON.stringify({ 
+            email, 
+            name, 
+            username: username || null, 
+            password, 
+            password_check: passwordCheck,
+            account_key_cipher: accountKey.cipher,
+            account_key_nonce: accountKey.nonce,
+            account_key_salt: accountKey.salt,
+        }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Registration failed');
     return true;
+}
+
+/**
+ * Generate account encryption key for multi-device sync.
+ * Creates a random 256-bit key and encrypts it with password-derived key.
+ */
+async function generateAccountKey() {
+    // Generate random 256-bit account key
+    const accountKeyBytes = crypto.getRandomValues(new Uint8Array(32));
+    
+    // Generate random salt for PBKDF2
+    const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+    const saltHex = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    // Derive key from password using PBKDF2 via Web Crypto API
+    const encoder = new TextEncoder();
+    const passwordData = encoder.encode(document.getElementById('register-password').value);
+    
+    // Import password as key material
+    const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        passwordData,
+        { name: 'PBKDF2' },
+        false,
+        ['deriveBits']
+    );
+    
+    // Derive 256 bits using PBKDF2
+    const derivedBits = await crypto.subtle.deriveBits(
+        {
+            name: 'PBKDF2',
+            salt: saltBytes,
+            iterations: 100000,
+            hash: 'SHA-256',
+        },
+        keyMaterial,
+        256
+    );
+    
+    // XOR account key with derived key (simple encryption)
+    const derivedKey = new Uint8Array(derivedBits);
+    const encryptedKey = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) {
+        encryptedKey[i] = accountKeyBytes[i] ^ derivedKey[i];
+    }
+    
+    // Convert to base64
+    const cipherBase64 = arrayBufferToBase64(encryptedKey.buffer);
+    
+    // Generate nonce (not used in XOR but stored for compatibility)
+    const nonceBytes = crypto.getRandomValues(new Uint8Array(12));
+    const nonceHex = Array.from(nonceBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    return {
+        cipher: cipherBase64,
+        nonce: nonceHex,
+        salt: saltHex,
+    };
+}
+
+/**
+ * Convert ArrayBuffer to base64 string.
+ */
+function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+/**
+ * Convert base64 string to ArrayBuffer.
+ */
+function base64ToArrayBuffer(base64) {
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
 }
 
 async function logout() {
@@ -1111,6 +1223,10 @@ async function logout() {
     finally {
         authToken = null;
         localStorage.removeItem('authToken');
+        // Clear account encryption keys
+        localStorage.removeItem('accountKey');
+        localStorage.removeItem('accountKeyNonce');
+        localStorage.removeItem('accountKeySalt');
         if (websocket) { websocket.close(); websocket = null; }
         if (notificationWs) { notificationWs.close(); notificationWs = null; }
         // Reset caches
