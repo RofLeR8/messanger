@@ -733,6 +733,16 @@ async def delete_chat_encrypted_keys(db: AsyncSession, chat_id: int) -> None:
     await db.commit()
 
 
+async def chat_has_any_encrypted_keys(db: AsyncSession, chat_id: int) -> bool:
+    q = (
+        select(func.count(ChatEncryptedKey.id))
+        .where(ChatEncryptedKey.chat_id == chat_id)
+        .where(ChatEncryptedKey.key_id != SERVER_BACKUP_KEY_ID)
+    )
+    count = (await db.execute(q)).scalar() or 0
+    return count > 0
+
+
 # ==================== Group Chat Management ====================
 
 async def leave_group_chat(db: AsyncSession, chat_id: int, user_id: int) -> bool:

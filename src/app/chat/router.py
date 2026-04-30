@@ -34,6 +34,7 @@ from app.chat.crud import (
     get_chat_backup_key_for_user,
     edit_message_encrypted,
     delete_chat_encrypted_keys,
+    chat_has_any_encrypted_keys,
 )
 from app.chat.schemas import (
     SMessageCreate,
@@ -323,6 +324,18 @@ async def recover_my_chat_key(
         "key_version": backup.key_version,
         "chat_key_plaintext": backup.encrypted_chat_key,
     }
+
+
+@router.get("/{chat_id}/keys/meta")
+async def get_chat_keys_meta(
+    chat_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    current_user_id = user.id
+    await _verify_user_in_chat(db, chat_id, current_user_id)
+    has_any = await chat_has_any_encrypted_keys(db, chat_id)
+    return {"chat_id": chat_id, "has_any_keys": has_any}
 
 
 

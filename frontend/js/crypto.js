@@ -204,6 +204,21 @@
         }
 
         if (mine.status === 404) {
+            let hasAnyKeys = false;
+            try {
+                const metaResp = await fetch(`/chats/${chatId}/keys/meta`, { headers: { Authorization: `Bearer ${authToken}` } });
+                if (metaResp.ok) {
+                    const meta = await metaResp.json();
+                    hasAnyKeys = Boolean(meta?.has_any_keys);
+                }
+            } catch (_) {}
+
+            if (hasAnyKeys) {
+                debugLog('chat_key.ensure.no_device_key_but_chat_has_keys', { chatId, myKeyId: pair.keyId });
+                const wrapped = new Error('CHAT_KEY_MISMATCH');
+                throw wrapped;
+            }
+
             debugLog('chat_key.ensure.no_key_for_device_bootstrap', { chatId, myKeyId: pair.keyId });
             return bootstrapChatKeyForMembers(chatId, members, currentUserId, authToken);
         }
