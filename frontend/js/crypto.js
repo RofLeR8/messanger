@@ -142,11 +142,11 @@
         const existing = loadChatKey(chatId);
         if (existing) return existing;
 
-        const mine = await fetch(`/chats/${chatId}/keys/me`, { headers: { Authorization: `Bearer ${authToken}` } });
+        const pair = await getOrCreateDeviceKeyPair();
+        const mine = await fetch(`/chats/${chatId}/keys/me?key_id=${encodeURIComponent(pair.keyId)}`, { headers: { Authorization: `Bearer ${authToken}` } });
         if (mine.ok) {
             try {
                 const myKey = await mine.json();
-                const pair = await getOrCreateDeviceKeyPair();
                 const decryptedRaw = await crypto.subtle.decrypt(
                     { name: 'RSA-OAEP' },
                     pair.privateKey,
