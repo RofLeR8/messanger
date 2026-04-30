@@ -7,6 +7,17 @@
     const textEncoder = new TextEncoder();
     const textDecoder = new TextDecoder();
     const chatKeyCache = new Map();
+    const E2EE_DEBUG = true;
+
+    function debugLog(event, details = null) {
+        if (!E2EE_DEBUG) return;
+        const ts = new Date().toISOString();
+        if (details == null) {
+            console.log(`[E2EE][${ts}] ${event}`);
+            return;
+        }
+        console.log(`[E2EE][${ts}] ${event}`, details);
+    }
 
     function toBase64(bytes) {
         let binary = '';
@@ -30,6 +41,7 @@
         const existing = localStorage.getItem(STORE_KEYPAIR);
         const existingKeyId = localStorage.getItem(STORE_KEYID);
         if (existing && existingKeyId) {
+            debugLog('device_keypair.load_existing', { keyId: existingKeyId });
             const parsed = JSON.parse(existing);
             const privateKey = await crypto.subtle.importKey('jwk', parsed.privateKey, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['decrypt']);
             const publicKey = await crypto.subtle.importKey('jwk', parsed.publicKey, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt']);
@@ -44,6 +56,7 @@
         const publicJwk = await crypto.subtle.exportKey('jwk', pair.publicKey);
         const privateJwk = await crypto.subtle.exportKey('jwk', pair.privateKey);
         const keyId = randomId('device');
+        debugLog('device_keypair.generated', { keyId });
         localStorage.setItem(STORE_KEYPAIR, JSON.stringify({ publicKey: publicJwk, privateKey: privateJwk }));
         localStorage.setItem(STORE_KEYID, keyId);
         return { keyId, privateKey: pair.privateKey, publicKey: pair.publicKey, publicJwk };
@@ -51,11 +64,13 @@
 
     async function uploadMyPublicKey(authToken) {
         const pair = await getOrCreateDeviceKeyPair();
+        debugLog('public_key.upload.start', { keyId: pair.keyId });
         await fetch('/users/me/keys', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
             body: JSON.stringify({ key_id: pair.keyId, algorithm: 'RSA-OAEP', public_key: JSON.stringify(pair.publicJwk) }),
         });
+        debugLog('public_key.upload.done', { keyId: pair.keyId });
         return pair;
     }
 
@@ -97,6 +112,7 @@
     }
 
     async function bootstrapChatKeyForMembers(chatId, members, currentUserId, authToken) {
+        debugLog('chat_key.bootstrap.start', { chatId, currentUserId, membersCount: members?.length || 0 });
         const pair = await getOrCreateDeviceKeyPair();
         const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
         const exportedKey = await exportAesKey(aesKey);
@@ -108,6 +124,7 @@
             const keysResp = await fetch(`/users/${uid}/keys`, { headers: { Authorization: `Bearer ${authToken}` } });
             if (!keysResp.ok) continue;
             const keys = await keysResp.json();
+            debugLog('chat_key.bootstrap.member_keys', { chatId, targetUserId: uid, keysCount: Array.isArray(keys) ? keys.length : null, myKeyId: pair.keyId });
             if (!Array.isArray(keys) || keys.length === 0) continue;
 
             for (const active of keys) {
@@ -125,6 +142,7 @@
                         backup_key_plaintext: uid === currentUserId ? exportedKey : undefined,
                     }),
                 });
+                debugLog('chat_key.bootstrap.store_result', { chatId, targetUserId: uid, targetKeyId: active.key_id, status: storeResp.status, ok: storeResp.ok });
                 if (storeResp.ok && uid === currentUserId && active.key_id === pair.keyId) selfKeyStored = true;
             }
         }
@@ -135,6 +153,7 @@
         saveChatKey(chatId, keyVersion, exportedKey);
         const cached = { keyVersion, key: exportedKey };
         chatKeyCache.set(chatId, cached);
+        debugLog('chat_key.bootstrap.done', { chatId, keyVersion, selfKeyStored, myKeyId: pair.keyId });
         return cached;
     }
 
@@ -143,10 +162,13 @@
         if (existing) return existing;
 
         const pair = await getOrCreateDeviceKeyPair();
+        debugLog('chat_key.ensure.start', { chatId, currentUserId, myKeyId: pair.keyId });
         const mine = await fetch(`/chats/${chatId}/keys/me?key_id=${encodeURIComponent(pair.keyId)}`, { headers: { Authorization: `Bearer ${authToken}` } });
+        debugLog('chat_key.ensure.fetch_my_key', { chatId, myKeyId: pair.keyId, status: mine.status, ok: mine.ok });
         if (mine.ok) {
             try {
                 const myKey = await mine.json();
+                debugLog('chat_key.ensure.my_key_payload', { chatId, returnedKeyId: myKey?.key_id, keyVersion: myKey?.key_version });
                 const decryptedRaw = await crypto.subtle.decrypt(
                     { name: 'RSA-OAEP' },
                     pair.privateKey,
@@ -156,11 +178,14 @@
                 const cached = { keyVersion: myKey.key_version, key: keyBase64 };
                 saveChatKey(chatId, myKey.key_version, keyBase64);
                 chatKeyCache.set(chatId, cached);
+                debugLog('chat_key.ensure.decrypt_success', { chatId, keyVersion: myKey.key_version, returnedKeyId: myKey?.key_id, myKeyId: pair.keyId });
                 return cached;
             } catch (error) {
+                debugLog('chat_key.ensure.decrypt_failed', { chatId, myKeyId: pair.keyId, error: String(error?.message || error) });
                 const recoverResp = await fetch(`/chats/${chatId}/keys/me/recover`, {
                     headers: { Authorization: `Bearer ${authToken}` },
                 });
+                debugLog('chat_key.ensure.recover_attempt', { chatId, status: recoverResp.status, ok: recoverResp.ok });
                 if (recoverResp.ok) {
                     const recovered = await recoverResp.json();
                     const recoveredBase64 = recovered.chat_key_plaintext;
@@ -169,6 +194,7 @@
                     try {
                         await shareChatKeyToUser(chatId, currentUserId, authToken, recoveredBase64, recovered.key_version || 1, true);
                     } catch (_) {}
+                    debugLog('chat_key.ensure.recover_success', { chatId, keyVersion: recovered.key_version || 1, myKeyId: pair.keyId });
                     return { keyVersion: recovered.key_version || 1, key: recoveredBase64 };
                 }
                 const wrapped = new Error('CHAT_KEY_MISMATCH');
@@ -178,8 +204,10 @@
         }
 
         if (mine.status === 404) {
+            debugLog('chat_key.ensure.no_key_for_device_bootstrap', { chatId, myKeyId: pair.keyId });
             return bootstrapChatKeyForMembers(chatId, members, currentUserId, authToken);
         }
+        debugLog('chat_key.ensure.failed', { chatId, myKeyId: pair.keyId, status: mine.status });
         throw new Error(`Failed to load chat key: ${mine.status}`);
     }
 
@@ -198,6 +226,7 @@
         const keysResp = await fetch(`/users/${targetUserId}/keys`, { headers: { Authorization: `Bearer ${authToken}` } });
         if (!keysResp.ok) throw new Error('Failed to load target public key');
         const keys = await keysResp.json();
+        debugLog('chat_key.share.start', { chatId, targetUserId, keysCount: Array.isArray(keys) ? keys.length : null, includeBackup });
         if (!Array.isArray(keys) || keys.length === 0) throw new Error('Target has no public keys');
 
         let hasSuccess = false;
@@ -215,11 +244,13 @@
                     backup_key_plaintext: includeBackup ? chatKey.key : undefined,
                 }),
             });
+            debugLog('chat_key.share.store_result', { chatId, targetUserId, targetKeyId: active.key_id, status: resp.status, ok: resp.ok });
             if (resp.ok) hasSuccess = true;
         }
         if (!hasSuccess) {
             throw new Error('Failed to share chat key to any target device key');
         }
+        debugLog('chat_key.share.done', { chatId, targetUserId, hasSuccess });
     }
 
     async function encryptText(chatId, content, extraAad = null) {
@@ -246,12 +277,20 @@
         if (!payload) return null;
         const chatKey = loadChatKey(chatId);
         if (!chatKey) return null;
+        debugLog('message.decrypt.start', {
+            chatId,
+            keyVersion: chatKey.keyVersion,
+            senderKeyId: payload?.sender_key_id || null,
+            encryptionVersion: payload?.encryption_version || null,
+            hasAad: Boolean(payload?.aad),
+        });
         const key = await importAesKey(chatKey.key);
         const decAlgo = { name: 'AES-GCM', iv: fromBase64(payload.nonce) };
         if (payload.aad) {
             decAlgo.additionalData = fromBase64(payload.aad);
         }
         const decrypted = await crypto.subtle.decrypt(decAlgo, key, fromBase64(payload.ciphertext));
+        debugLog('message.decrypt.success', { chatId, keyVersion: chatKey.keyVersion });
         return textDecoder.decode(decrypted);
     }
 
