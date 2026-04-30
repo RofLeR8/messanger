@@ -295,12 +295,13 @@ async def get_messages_list(
 @router.get("/{chat_id}/keys/me", response_model=SChatEncryptedKeyRead)
 async def get_my_chat_key(
     chat_id: int,
+    key_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     current_user_id = user.id
     await _verify_user_in_chat(db, chat_id, current_user_id)
-    chat_key = await get_chat_encrypted_key_for_user(db, chat_id, current_user_id)
+    chat_key = await get_chat_encrypted_key_for_user(db, chat_id, current_user_id, key_id=key_id)
     if not chat_key:
         raise HTTPException(status_code=404, detail="No encrypted chat key for this user")
     return chat_key
