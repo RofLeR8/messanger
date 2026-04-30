@@ -395,6 +395,15 @@
                         <label for="group-chat-name">Group name</label>
                         <input type="text" id="group-chat-name" required placeholder="Enter group name" minlength="1" maxlength="255">
                     </div>
+                    <div class="profile-avatar-section" style="margin-bottom: 12px;">
+                        <div id="group-photo-preview" class="profile-avatar-large">👥</div>
+                        <div class="avatar-upload-overlay">
+                            <input type="file" id="group-photo-upload-input" class="hidden-input" accept="image/*">
+                            <label for="group-photo-upload-input" class="avatar-upload-btn" title="Upload group photo">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            </label>
+                        </div>
+                    </div>
                     <div class="form-group">
                         <label for="group-chat-photo">Group photo URL <span style="color:var(--text-secondary);font-size:0.8rem;">(optional)</span></label>
                         <input type="url" id="group-chat-photo" placeholder="https://...">
@@ -430,9 +439,14 @@
                     <input type="text" id="group-edit-name" placeholder="New group name" class="input-field input-small">
                     <button id="save-group-name-btn" class="btn btn-secondary btn-sm">Save</button>
                 </div>
-                <div class="input-with-button" style="margin-bottom:10px;">
-                    <input type="url" id="group-edit-photo" placeholder="New photo URL" class="input-field input-small">
-                    <button id="save-group-photo-btn" class="btn btn-secondary btn-sm">Save</button>
+                <div class="profile-avatar-section" style="margin-bottom: 10px;">
+                    <div id="group-edit-photo-preview" class="profile-avatar-large">👥</div>
+                    <div class="avatar-upload-overlay">
+                        <input type="file" id="group-edit-photo-upload-input" class="hidden-input" accept="image/*">
+                        <label for="group-edit-photo-upload-input" class="avatar-upload-btn" title="Upload new group photo">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        </label>
+                    </div>
                 </div>
             </div>
             <div id="group-add-member-section" class="group-add-member-section hidden">

@@ -44,6 +44,7 @@ let contextChatId = null;
 
 // Group members cache
 let currentChatMembers = []; // Cached members of current chat
+let pendingGroupPhotoUrl = null;
 
 // DOM Elements
 const authSection = document.getElementById('auth-section');
@@ -147,7 +148,8 @@ const groupChatForm = document.getElementById('group-chat-form');
 const groupChatNameInput = document.getElementById('group-chat-name');
 const groupMembersSelect = document.getElementById('group-members-select');
 const closeGroupModalBtn = document.getElementById('close-group-modal-btn');
-const groupChatPhotoInput = document.getElementById('group-chat-photo');
+const groupPhotoPreview = document.getElementById('group-photo-preview');
+const groupPhotoUploadInput = document.getElementById('group-photo-upload-input');
 
 // Group members panel
 const groupMembersPanel = document.getElementById('group-members-panel');
@@ -159,9 +161,9 @@ const leaveGroupBtn = document.getElementById('leave-group-btn');
 const groupEditSection = document.getElementById('group-edit-section');
 const addMemberSection = document.getElementById('group-add-member-section');
 const groupEditNameInput = document.getElementById('group-edit-name');
-const groupEditPhotoInput = document.getElementById('group-edit-photo');
+const groupEditPhotoPreview = document.getElementById('group-edit-photo-preview');
+const groupEditPhotoUploadInput = document.getElementById('group-edit-photo-upload-input');
 const saveGroupNameBtn = document.getElementById('save-group-name-btn');
-const saveGroupPhotoBtn = document.getElementById('save-group-photo-btn');
 const leaveGroupSection = document.getElementById('leave-group-section');
 
 // Utility Functions
@@ -2819,7 +2821,8 @@ async function renderFriendCheckboxes() {
 function openGroupChatModal() {
     showElement(groupChatModal);
     groupChatNameInput.value = '';
-    if (groupChatPhotoInput) groupChatPhotoInput.value = '';
+    pendingGroupPhotoUrl = null;
+    if (groupPhotoPreview) groupPhotoPreview.textContent = '👥';
     renderMemberCheckboxes();
 }
 function closeGroupChatModal() { hideElement(groupChatModal); groupChatForm.reset(); }
@@ -2866,6 +2869,19 @@ async function updateGroupChatSettings(chatId, payload) {
         throw new Error(error.detail || 'Failed to update group');
     }
     return await response.json();
+}
+
+
+function renderGroupPhotoPreview(targetEl, photoUrl) {
+    if (!targetEl) return;
+    if (photoUrl) targetEl.innerHTML = `<img src="${escapeHtml(photoUrl)}" alt="Group photo">`;
+    else targetEl.textContent = '👥';
+}
+
+async function handleGroupPhotoUpload(file, onUploaded) {
+    const result = await uploadAvatarFile(file);
+    const photoUrl = result.file_url;
+    await onUploaded(photoUrl);
 }
 
 // ==================== Event Listeners ====================
@@ -2924,7 +2940,7 @@ groupChatForm.addEventListener('submit', async (e) => {
     if (!name) { alert('Please enter a group name'); return; }
 
     const selectedMembers = Array.from(groupMembersSelect.querySelectorAll('input[type="checkbox"]:checked')).map(cb => parseInt(cb.value));
-    const photoUrl = groupChatPhotoInput?.value?.trim() || null;
+    const photoUrl = pendingGroupPhotoUrl || null;
     if (selectedMembers.length === 0) { alert('Please select at least one member'); return; }
 
     try {
@@ -2949,16 +2965,32 @@ if (saveGroupNameBtn) {
         } catch (error) { alert('Failed to update group name: ' + error.message); }
     });
 }
-if (saveGroupPhotoBtn) {
-    saveGroupPhotoBtn.addEventListener('click', async () => {
-        const photo_url = groupEditPhotoInput?.value?.trim();
-        if (!photo_url || !currentChatId) return;
+
+
+if (groupPhotoUploadInput) {
+    groupPhotoUploadInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
         try {
+            pendingGroupPhotoUrl = (await uploadAvatarFile(file)).file_url;
+            renderGroupPhotoPreview(groupPhotoPreview, pendingGroupPhotoUrl);
+        } catch (error) { alert('Failed to upload group photo: ' + error.message); }
+        groupPhotoUploadInput.value = '';
+    });
+}
+
+if (groupEditPhotoUploadInput) {
+    groupEditPhotoUploadInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file || !currentChatId) return;
+        try {
+            const photo_url = (await uploadAvatarFile(file)).file_url;
             await updateGroupChatSettings(currentChatId, { photo_url });
+            renderGroupPhotoPreview(groupEditPhotoPreview, photo_url);
             renderChatHeaderAvatar(photo_url);
-            groupEditPhotoInput.value = '';
             await loadChats();
         } catch (error) { alert('Failed to update group photo: ' + error.message); }
+        groupEditPhotoUploadInput.value = '';
     });
 }
 
