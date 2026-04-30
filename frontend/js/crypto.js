@@ -83,16 +83,21 @@
     }
 
     function loadChatKey(chatId) {
-        if (chatKeyCache.has(chatId)) return chatKeyCache.get(chatId);
-        const str = localStorage.getItem(STORE_CHAT_KEYS);
-        if (!str) return null;
-        const parsed = JSON.parse(str);
-        if (!parsed[chatId]) return null;
-        chatKeyCache.set(chatId, parsed[chatId]);
-        const versions = Object.keys(parsed[chatId]).map(v => Number(v)).filter(v => Number.isFinite(v));
+        let chatMap = null;
+        if (chatKeyCache.has(chatId)) {
+            chatMap = chatKeyCache.get(chatId);
+        } else {
+            const str = localStorage.getItem(STORE_CHAT_KEYS);
+            if (!str) return null;
+            const parsed = JSON.parse(str);
+            if (!parsed[chatId]) return null;
+            chatMap = parsed[chatId];
+            chatKeyCache.set(chatId, chatMap);
+        }
+        const versions = Object.keys(chatMap).map(v => Number(v)).filter(v => Number.isFinite(v));
         if (versions.length === 0) return null;
         const latest = Math.max(...versions);
-        return { keyVersion: latest, key: parsed[chatId][String(latest)] };
+        return { keyVersion: latest, key: chatMap[String(latest)] };
     }
 
 
