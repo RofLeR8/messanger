@@ -108,22 +108,25 @@
             const keysResp = await fetch(`/users/${uid}/keys`, { headers: { Authorization: `Bearer ${authToken}` } });
             if (!keysResp.ok) continue;
             const keys = await keysResp.json();
-            const active = keys[0];
-            if (!active) continue;
-            const memberPub = await crypto.subtle.importKey('jwk', JSON.parse(active.public_key), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt']);
-            const encrypted = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, memberPub, fromBase64(exportedKey));
-            const storeResp = await fetch(`/chats/${chatId}/keys/${uid}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
-                body: JSON.stringify({
-                    key_id: pair.keyId,
-                    encrypted_chat_key: toBase64(new Uint8Array(encrypted)),
-                    key_version: keyVersion,
-                    // Always store backup for current user
-                    backup_key_plaintext: uid === currentUserId ? exportedKey : undefined,
-                }),
-            });
-            if (storeResp.ok && uid === currentUserId) selfKeyStored = true;
+            if (!Array.isArray(keys) || keys.length === 0) continue;
+
+            for (const active of keys) {
+                if (!active || !active.public_key || !active.key_id) continue;
+                const memberPub = await crypto.subtle.importKey('jwk', JSON.parse(active.public_key), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt']);
+                const encrypted = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, memberPub, fromBase64(exportedKey));
+                const storeResp = await fetch(`/chats/${chatId}/keys/${uid}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+                    body: JSON.stringify({
+                        key_id: active.key_id,
+                        encrypted_chat_key: toBase64(new Uint8Array(encrypted)),
+                        key_version: keyVersion,
+                        // Always store backup for current user
+                        backup_key_plaintext: uid === currentUserId ? exportedKey : undefined,
+                    }),
+                });
+                if (storeResp.ok && uid === currentUserId && active.key_id === pair.keyId) selfKeyStored = true;
+            }
         }
 
         if (!selfKeyStored) {
@@ -139,11 +142,11 @@
         const existing = loadChatKey(chatId);
         if (existing) return existing;
 
-        const mine = await fetch(`/chats/${chatId}/keys/me`, { headers: { Authorization: `Bearer ${authToken}` } });
+        const pair = await getOrCreateDeviceKeyPair();
+        const mine = await fetch(`/chats/${chatId}/keys/me?key_id=${encodeURIComponent(pair.keyId)}`, { headers: { Authorization: `Bearer ${authToken}` } });
         if (mine.ok) {
             try {
                 const myKey = await mine.json();
-                const pair = await getOrCreateDeviceKeyPair();
                 const decryptedRaw = await crypto.subtle.decrypt(
                     { name: 'RSA-OAEP' },
                     pair.privateKey,
@@ -192,28 +195,30 @@
     async function shareChatKeyToUser(chatId, targetUserId, authToken, overrideKey = null, overrideVersion = null, includeBackup = false) {
         const chatKey = overrideKey ? { key: overrideKey, keyVersion: overrideVersion || 1 } : loadChatKey(chatId);
         if (!chatKey) throw new Error('Missing local chat key');
-        const myKeyId = localStorage.getItem(STORE_KEYID);
-        if (!myKeyId) throw new Error('Missing device key id');
-
         const keysResp = await fetch(`/users/${targetUserId}/keys`, { headers: { Authorization: `Bearer ${authToken}` } });
         if (!keysResp.ok) throw new Error('Failed to load target public key');
         const keys = await keysResp.json();
-        const active = keys[0];
-        if (!active) throw new Error('Target has no public keys');
-        const memberPub = await crypto.subtle.importKey('jwk', JSON.parse(active.public_key), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt']);
-        const encrypted = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, memberPub, fromBase64(chatKey.key));
-        const resp = await fetch(`/chats/${chatId}/keys/${targetUserId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
-            body: JSON.stringify({
-                key_id: myKeyId,
-                encrypted_chat_key: toBase64(new Uint8Array(encrypted)),
-                key_version: chatKey.keyVersion || 1,
-                backup_key_plaintext: includeBackup ? chatKey.key : undefined,
-            }),
-        });
-        if (!resp.ok) {
-            throw new Error(`Failed to share chat key: ${resp.status}`);
+        if (!Array.isArray(keys) || keys.length === 0) throw new Error('Target has no public keys');
+
+        let hasSuccess = false;
+        for (const active of keys) {
+            if (!active || !active.public_key || !active.key_id) continue;
+            const memberPub = await crypto.subtle.importKey('jwk', JSON.parse(active.public_key), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt']);
+            const encrypted = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, memberPub, fromBase64(chatKey.key));
+            const resp = await fetch(`/chats/${chatId}/keys/${targetUserId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+                body: JSON.stringify({
+                    key_id: active.key_id,
+                    encrypted_chat_key: toBase64(new Uint8Array(encrypted)),
+                    key_version: chatKey.keyVersion || 1,
+                    backup_key_plaintext: includeBackup ? chatKey.key : undefined,
+                }),
+            });
+            if (resp.ok) hasSuccess = true;
+        }
+        if (!hasSuccess) {
+            throw new Error('Failed to share chat key to any target device key');
         }
     }
 

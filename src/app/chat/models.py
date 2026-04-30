@@ -4,6 +4,7 @@ from app.database import Base
 from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 import enum
+import sqlalchemy as sa
 
 if TYPE_CHECKING:
     from app.users.models import User
@@ -123,5 +124,6 @@ class ChatEncryptedKey(Base):
     key_id: Mapped[str] = mapped_column(String(128), nullable=False)
     encrypted_chat_key: Mapped[str] = mapped_column(Text, nullable=False)
     key_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=sa.text("now()"), nullable=False)
 
     chat: Mapped["Chat"] = relationship("Chat", lazy="select")
