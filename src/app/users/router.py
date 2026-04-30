@@ -16,6 +16,8 @@ from app.utils.jwt import get_password_hash
 from app.utils.auth import authenticate_user
 from app.users.auth import create_access_token, decode_account_key_to_base64
 from app.config import settings
+from app.users.dependensies import get_current_user
+from app.users.models import User
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -94,30 +96,30 @@ async def logout_user(response: Response):
 @router.get("/sessions/", response_model=list[SUserSessionRead])
 async def get_user_sessions_endpoint(
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(lambda: None),  # TODO: Add proper auth dependency
+    current_user: User = Depends(get_current_user),
 ):
     """Get all active sessions for the current user."""
-    # TODO: Replace with actual current_user from auth dependency
-    # For now, this is a placeholder
-    raise HTTPException(status_code=501, detail="Not implemented - requires auth dependency")
+    return await get_user_sessions(db=db, user_id=current_user.id)
 
 
 @router.delete("/sessions/{session_id}")
 async def revoke_session_endpoint(
     session_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(lambda: None),  # TODO: Add proper auth dependency
+    current_user: User = Depends(get_current_user),
 ):
     """Revoke a specific session."""
-    # TODO: Replace with actual current_user from auth dependency
-    raise HTTPException(status_code=501, detail="Not implemented - requires auth dependency")
+    revoked = await revoke_user_session(db=db, session_id=session_id, user_id=current_user.id)
+    if not revoked:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    return {"ok": True, "message": "Session revoked"}
 
 
 @router.post("/sessions/revoke-all")
 async def revoke_all_sessions_endpoint(
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(lambda: None),  # TODO: Add proper auth dependency
+    current_user: User = Depends(get_current_user),
 ):
     """Revoke all sessions for the current user (force logout everywhere)."""
-    # TODO: Replace with actual current_user from auth dependency
-    raise HTTPException(status_code=501, detail="Not implemented - requires auth dependency")
+    revoked_count = await revoke_all_user_sessions(db=db, user_id=current_user.id)
+    return {"ok": True, "revoked_count": revoked_count}
