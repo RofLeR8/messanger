@@ -3,6 +3,7 @@ const API_BASE_URL = '';
 
 // State
 let authToken = null;
+let currentSessionId = null;
 let currentChatId = null;
 let currentUserId = null;
 let websocket = null;
@@ -103,6 +104,10 @@ const attachFileBtn = document.getElementById('attach-file-btn');
 const chatsPage = document.getElementById('chats-page');
 const chatPage = document.getElementById('chat-page');
 const uiScaleSelect = document.getElementById('ui-scale-select');
+const refreshSessionsBtn = document.getElementById('refresh-sessions-btn');
+const revokeOtherSessionsBtn = document.getElementById('revoke-other-sessions-btn');
+const sessionsStatus = document.getElementById('sessions-status');
+const sessionsList = document.getElementById('sessions-list');
 
 // Modals
 const directChatModal = document.getElementById('direct-chat-modal');
@@ -843,6 +848,8 @@ function switchToTab(tab) {
 
     if (tab === 'friends') {
         loadFriendsPage();
+    } else if (tab === 'settings') {
+        loadSessionsSettings();
     }
 }
 
@@ -1099,7 +1106,9 @@ async function login(email, password) {
     if (!response.ok) throw new Error(data.detail || 'Login failed');
     
     authToken = data.access_token;
+    currentSessionId = data.session_id ?? null;
     localStorage.setItem('authToken', authToken);
+    if (currentSessionId != null) localStorage.setItem('currentSessionId', String(currentSessionId));
     
     // Store account encryption key for multi-device sync
     if (data.account_key) {
@@ -1223,6 +1232,8 @@ async function logout() {
     finally {
         authToken = null;
         localStorage.removeItem('authToken');
+        localStorage.removeItem('currentSessionId');
+        currentSessionId = null;
         // Clear account encryption keys
         localStorage.removeItem('accountKey');
         localStorage.removeItem('accountKeyNonce');
@@ -1244,6 +1255,96 @@ async function handleUnauthorizedSession() {
 }
 
 // ==================== API Functions ====================
+async function getMySessions() {
+    const response = await fetch(`${API_BASE_URL}/auth/sessions/`, {
+        headers: { 'Authorization': `Bearer ${authToken}` },
+        credentials: 'include',
+    });
+    if (response.status === 401 || response.status === 403) throw new Error('Unauthorized');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to load sessions');
+    return data;
+}
+
+async function revokeSessionById(sessionId) {
+    const response = await fetch(`${API_BASE_URL}/auth/sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${authToken}` },
+        credentials: 'include',
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to revoke session');
+    return data;
+}
+
+async function revokeAllMySessions() {
+    const response = await fetch(`${API_BASE_URL}/auth/sessions/revoke-all`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` },
+        credentials: 'include',
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to revoke sessions');
+    return data;
+}
+
+function formatSessionDate(value) {
+    if (!value) return '—';
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
+}
+
+function renderSessions(sessions) {
+    if (!sessionsList) return;
+    sessionsList.innerHTML = '';
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+        sessionsList.innerHTML = '<div class="session-meta">No active sessions.</div>';
+        return;
+    }
+    sessions.forEach((session) => {
+        const isCurrent = currentSessionId != null && Number(session.id) === Number(currentSessionId);
+        const item = document.createElement('div');
+        item.className = 'session-item';
+        item.innerHTML = `
+            <div class="session-item-header">
+                <div class="session-item-title">${escapeHtml(session.device_name || 'Unknown device')}${isCurrent ? ' (current)' : ''}</div>
+                <button class="btn btn-icon btn-sm" ${isCurrent ? 'disabled title="Current session"' : ''} data-revoke-session-id="${session.id}">✕</button>
+            </div>
+            <div class="session-meta">${escapeHtml(session.device_info || 'No device info')}</div>
+            <div class="session-meta">Created: ${formatSessionDate(session.created_at)} · Last active: ${formatSessionDate(session.last_active_at)}</div>
+        `;
+        sessionsList.appendChild(item);
+    });
+
+    sessionsList.querySelectorAll('[data-revoke-session-id]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const sessionId = Number(btn.dataset.revokeSessionId);
+            if (!sessionId || !confirm('Close this session?')) return;
+            try {
+                await revokeSessionById(sessionId);
+                await loadSessionsSettings();
+            } catch (error) {
+                if (sessionsStatus) sessionsStatus.textContent = error.message;
+            }
+        });
+    });
+}
+
+async function loadSessionsSettings() {
+    if (!sessionsStatus) return;
+    sessionsStatus.textContent = 'Loading sessions...';
+    try {
+        const sessions = await getMySessions();
+        renderSessions(sessions);
+        sessionsStatus.textContent = `Active sessions: ${sessions.length}`;
+    } catch (error) {
+        sessionsStatus.textContent = error.message;
+        if (String(error.message).includes('Unauthorized')) {
+            await handleUnauthorizedSession();
+        }
+    }
+}
+
 async function getChats() {
     const response = await fetch(`${API_BASE_URL}/chats/?t=${Date.now()}`, {
         headers: { 'Authorization': `Bearer ${authToken}` },
@@ -2926,6 +3027,21 @@ if (tabFriends) {
 if (tabSettings) {
     tabSettings.addEventListener('click', () => switchToTab('settings'));
 }
+if (refreshSessionsBtn) {
+    refreshSessionsBtn.addEventListener('click', () => loadSessionsSettings());
+}
+if (revokeOtherSessionsBtn) {
+    revokeOtherSessionsBtn.addEventListener('click', async () => {
+        if (!confirm('Close all other sessions?')) return;
+        try {
+            const result = await revokeAllMySessions();
+            if (sessionsStatus) sessionsStatus.textContent = `Revoked: ${result.revoked_count ?? 0}`;
+            await loadSessionsSettings();
+        } catch (error) {
+            if (sessionsStatus) sessionsStatus.textContent = error.message;
+        }
+    });
+}
 
 // ==================== Friends Sub-tabs ====================
 if (friendsTabAll) {
@@ -3123,6 +3239,8 @@ if (avatarUploadInput) {
 window.addEventListener('DOMContentLoaded', async () => {
     initUiScaleSettings();
     const savedToken = localStorage.getItem('authToken');
+    const savedSessionId = localStorage.getItem('currentSessionId');
+    if (savedSessionId) currentSessionId = Number(savedSessionId);
     if (savedToken) {
         authToken = savedToken;
         const currentUser = await getCurrentUserInfo();

@@ -15,7 +15,9 @@ from app.users.exceptions import UserAlreadyExistsException, PasswordMismatchExc
 from app.utils.jwt import get_password_hash
 from app.utils.auth import authenticate_user
 from app.users.auth import create_access_token, decode_account_key_to_base64
-import base64
+from app.config import settings
+from app.users.dependensies import get_current_user
+from app.users.models import User
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -44,20 +46,31 @@ async def auth_user(response: Response, user_data: SUserAuth, db: AsyncSession =
     if check is None:
         raise IncorrectEmailOrPasswordException
     
+    user_id = check.id
+    account_key_nonce = check.account_key_nonce
+    account_key_salt = check.account_key_salt
+
+    # Decrypt account key for multi-device sync before any DB commit
+    account_key = await decrypt_account_key(check, user_data.password)
+    account_key_base64 = decode_account_key_to_base64(account_key) if account_key else None
+
     # Create a new session for this device
     session = await create_user_session(
         db=db,
-        user_id=check.id,
+        user_id=user_id,
         device_name=user_data.device_name,
         device_info=user_data.device_info,
     )
-    
-    # Decrypt account key for multi-device sync
-    account_key = await decrypt_account_key(check, user_data.password)
-    account_key_base64 = decode_account_key_to_base64(account_key) if account_key else None
-    
-    access_token = create_access_token({"sub": str(check.id)}, session_token=session.session_token)
-    response.set_cookie(key="user_access_token", value=access_token, httponly=True)
+
+    access_token = create_access_token({"sub": str(user_id)}, session_token=session.session_token)
+    response.set_cookie(
+        key="user_access_token",
+        value=access_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        domain=settings.COOKIE_DOMAIN,
+    )
     
     return {
         "ok": True,
@@ -65,44 +78,48 @@ async def auth_user(response: Response, user_data: SUserAuth, db: AsyncSession =
         "refresh_token": None,
         "message": "Authorization successful",
         "account_key": account_key_base64,
-        "account_key_nonce": check.account_key_nonce,
-        "account_key_salt": check.account_key_salt,
+        "account_key_nonce": account_key_nonce,
+        "account_key_salt": account_key_salt,
         "session_id": session.id,
     }
 
 @router.post("/logout/")
 async def logout_user(response: Response):
-    response.delete_cookie(key="user_access_token")
+    response.delete_cookie(
+        key="user_access_token",
+        samesite=settings.COOKIE_SAMESITE,
+        domain=settings.COOKIE_DOMAIN,
+    )
     return {"message": "successful logout"}
 
 
 @router.get("/sessions/", response_model=list[SUserSessionRead])
 async def get_user_sessions_endpoint(
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(lambda: None),  # TODO: Add proper auth dependency
+    current_user: User = Depends(get_current_user),
 ):
     """Get all active sessions for the current user."""
-    # TODO: Replace with actual current_user from auth dependency
-    # For now, this is a placeholder
-    raise HTTPException(status_code=501, detail="Not implemented - requires auth dependency")
+    return await get_user_sessions(db=db, user_id=current_user.id)
 
 
 @router.delete("/sessions/{session_id}")
 async def revoke_session_endpoint(
     session_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(lambda: None),  # TODO: Add proper auth dependency
+    current_user: User = Depends(get_current_user),
 ):
     """Revoke a specific session."""
-    # TODO: Replace with actual current_user from auth dependency
-    raise HTTPException(status_code=501, detail="Not implemented - requires auth dependency")
+    revoked = await revoke_user_session(db=db, session_id=session_id, user_id=current_user.id)
+    if not revoked:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    return {"ok": True, "message": "Session revoked"}
 
 
 @router.post("/sessions/revoke-all")
 async def revoke_all_sessions_endpoint(
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(lambda: None),  # TODO: Add proper auth dependency
+    current_user: User = Depends(get_current_user),
 ):
     """Revoke all sessions for the current user (force logout everywhere)."""
-    # TODO: Replace with actual current_user from auth dependency
-    raise HTTPException(status_code=501, detail="Not implemented - requires auth dependency")
+    revoked_count = await revoke_all_user_sessions(db=db, user_id=current_user.id)
+    return {"ok": True, "revoked_count": revoked_count}

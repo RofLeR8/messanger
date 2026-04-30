@@ -1864,6 +1864,7 @@ body {
     border-radius: 14px;
     padding: 16px;
     box-shadow: var(--shadow-sm);
+    margin-bottom: 14px;
 }
 
 .settings-card-title {
@@ -1896,6 +1897,43 @@ body {
     border-radius: 10px;
     padding: 8px 12px;
     min-width: 100px;
+}
+
+.settings-helper-text {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-top: 12px;
+}
+
+.sessions-list {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.session-item {
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px;
+    background: var(--bg-primary);
+}
+
+.session-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+.session-item-title {
+    font-weight: 600;
+}
+
+.session-meta {
+    margin-top: 6px;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
 }
 
 .friends-tabs {

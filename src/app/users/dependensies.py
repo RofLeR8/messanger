@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from app.config import get_auth_data
 from app.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.users.crud import get_one_by_id_or_none
+from app.users.crud import get_one_by_id_or_none, get_user_session_by_token
 
 
 def get_token(request: Request) -> str:
@@ -43,6 +43,17 @@ async def get_current_user(request: Request, token: str = Depends(get_token), db
 
     user_id: str = payload.get('sub')
     if not user_id:
+        raise unauthorized_exc
+
+    session_token = payload.get("session_token")
+    if not session_token:
+        raise unauthorized_exc
+    user_session = await get_user_session_by_token(db, session_token)
+    if (
+        not user_session
+        or user_session.user_id != int(user_id)
+        or (user_session.expires_at and user_session.expires_at < datetime.now(timezone.utc).replace(tzinfo=None))
+    ):
         raise unauthorized_exc
 
     user = await get_one_by_id_or_none(db, int(user_id))
