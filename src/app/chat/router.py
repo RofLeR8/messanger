@@ -415,7 +415,7 @@ async def upsert_chat_key_for_member(
         key_id=key_data.key_id,
         encrypted_chat_key=key_data.encrypted_chat_key,
         key_version=key_data.key_version,
-        backup_key_plaintext=key_data.backup_key_plaintext if user_id == current_user_id else None,
+        backup_key_plaintext=key_data.backup_key_plaintext,
     )
     return chat_key
 

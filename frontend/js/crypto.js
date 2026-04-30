@@ -138,8 +138,8 @@
                         key_id: active.key_id,
                         encrypted_chat_key: toBase64(new Uint8Array(encrypted)),
                         key_version: keyVersion,
-                        // Always store backup for current user
-                        backup_key_plaintext: uid === currentUserId ? exportedKey : undefined,
+                        // Store account-level recovery copy for every member
+                        backup_key_plaintext: exportedKey,
                     }),
                 });
                 debugLog('chat_key.bootstrap.store_result', { chatId, targetUserId: uid, targetKeyId: active.key_id, status: storeResp.status, ok: storeResp.ok });
@@ -235,7 +235,7 @@
         await uploadMyPublicKey(authToken);
     }
 
-    async function shareChatKeyToUser(chatId, targetUserId, authToken, overrideKey = null, overrideVersion = null, includeBackup = false) {
+    async function shareChatKeyToUser(chatId, targetUserId, authToken, overrideKey = null, overrideVersion = null, includeBackup = true) {
         const chatKey = overrideKey ? { key: overrideKey, keyVersion: overrideVersion || 1 } : loadChatKey(chatId);
         if (!chatKey) throw new Error('Missing local chat key');
         const keysResp = await fetch(`/users/${targetUserId}/keys`, { headers: { Authorization: `Bearer ${authToken}` } });
