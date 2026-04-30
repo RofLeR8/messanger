@@ -1,6 +1,6 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.websocket.manager import manager
-from app.users.crud import set_user_online, get_one_by_id_or_none
+from app.users.crud import set_user_online, get_one_by_id_or_none, get_user_session_by_token
 from app.database import async_session_maker
 from jose import jwt
 from datetime import datetime, timezone
@@ -42,9 +42,22 @@ async def notifications_websocket(
             return
 
         current_user_id = int(user_id)
+        session_token = payload.get("session_token")
+        if not session_token:
+            await websocket.close(code=4001, reason="Invalid token payload")
+            return
 
-    except Exception as e:
-        await websocket.close(code=4001, reason=f"Authentication failed: {str(e)}")
+        db = async_session_maker()
+        try:
+            user_session = await get_user_session_by_token(db, session_token)
+            if not user_session or user_session.user_id != current_user_id:
+                await websocket.close(code=4001, reason="Invalid session")
+                return
+        finally:
+            await db.close()
+
+    except Exception:
+        await websocket.close(code=4001, reason="Authentication failed")
         return
 
     # Set user online when notification WS connects

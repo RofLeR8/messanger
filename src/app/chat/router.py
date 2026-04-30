@@ -1,7 +1,7 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 import asyncio
 from app.users.dependensies import get_current_user
-from app.users.crud import get_one_by_id_or_none, set_user_online
+from app.users.crud import get_one_by_id_or_none, set_user_online, get_user_session_by_token
 from app.users.models import User
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -955,14 +955,23 @@ async def websocket_chat_connection(
             return
 
         current_user_id = int(user_id)
+        session_token = payload.get("session_token")
+        if not session_token:
+            await websocket.close(code=4001, reason="Invalid token payload")
+            return
+
+        user_session = await get_user_session_by_token(db, session_token)
+        if not user_session or user_session.user_id != current_user_id:
+            await websocket.close(code=4001, reason="Invalid session")
+            return
 
         user = await get_one_by_id_or_none(db, current_user_id)
         if not user:
             await websocket.close(code=4001, reason="User not found")
             return
 
-    except Exception as e:
-        await websocket.close(code=4001, reason=f"Authentication failed: {str(e)}")
+    except Exception:
+        await websocket.close(code=4001, reason="Authentication failed")
         return
 
     # Check if chat exists and user is a participant

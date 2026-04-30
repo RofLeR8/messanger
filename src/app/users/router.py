@@ -15,7 +15,7 @@ from app.users.exceptions import UserAlreadyExistsException, PasswordMismatchExc
 from app.utils.jwt import get_password_hash
 from app.utils.auth import authenticate_user
 from app.users.auth import create_access_token, decode_account_key_to_base64
-import base64
+from app.config import settings
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -48,6 +48,10 @@ async def auth_user(response: Response, user_data: SUserAuth, db: AsyncSession =
     account_key_nonce = check.account_key_nonce
     account_key_salt = check.account_key_salt
 
+    # Decrypt account key for multi-device sync before any DB commit
+    account_key = await decrypt_account_key(check, user_data.password)
+    account_key_base64 = decode_account_key_to_base64(account_key) if account_key else None
+
     # Create a new session for this device
     session = await create_user_session(
         db=db,
@@ -55,13 +59,16 @@ async def auth_user(response: Response, user_data: SUserAuth, db: AsyncSession =
         device_name=user_data.device_name,
         device_info=user_data.device_info,
     )
-    
-    # Decrypt account key for multi-device sync
-    account_key = await decrypt_account_key(check, user_data.password)
-    account_key_base64 = decode_account_key_to_base64(account_key) if account_key else None
-    
+
     access_token = create_access_token({"sub": str(user_id)}, session_token=session.session_token)
-    response.set_cookie(key="user_access_token", value=access_token, httponly=True)
+    response.set_cookie(
+        key="user_access_token",
+        value=access_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        domain=settings.COOKIE_DOMAIN,
+    )
     
     return {
         "ok": True,
@@ -76,7 +83,11 @@ async def auth_user(response: Response, user_data: SUserAuth, db: AsyncSession =
 
 @router.post("/logout/")
 async def logout_user(response: Response):
-    response.delete_cookie(key="user_access_token")
+    response.delete_cookie(
+        key="user_access_token",
+        samesite=settings.COOKIE_SAMESITE,
+        domain=settings.COOKIE_DOMAIN,
+    )
     return {"message": "successful logout"}
 
 
