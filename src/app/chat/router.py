@@ -34,6 +34,7 @@ from app.chat.crud import (
     get_chat_backup_key_for_user,
     edit_message_encrypted,
     delete_chat_encrypted_keys,
+    chat_has_any_encrypted_keys,
 )
 from app.chat.schemas import (
     SMessageCreate,
@@ -295,12 +296,13 @@ async def get_messages_list(
 @router.get("/{chat_id}/keys/me", response_model=SChatEncryptedKeyRead)
 async def get_my_chat_key(
     chat_id: int,
+    key_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     current_user_id = user.id
     await _verify_user_in_chat(db, chat_id, current_user_id)
-    chat_key = await get_chat_encrypted_key_for_user(db, chat_id, current_user_id)
+    chat_key = await get_chat_encrypted_key_for_user(db, chat_id, current_user_id, key_id=key_id)
     if not chat_key:
         raise HTTPException(status_code=404, detail="No encrypted chat key for this user")
     return chat_key
@@ -322,6 +324,18 @@ async def recover_my_chat_key(
         "key_version": backup.key_version,
         "chat_key_plaintext": backup.encrypted_chat_key,
     }
+
+
+@router.get("/{chat_id}/keys/meta")
+async def get_chat_keys_meta(
+    chat_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    current_user_id = user.id
+    await _verify_user_in_chat(db, chat_id, current_user_id)
+    has_any = await chat_has_any_encrypted_keys(db, chat_id)
+    return {"chat_id": chat_id, "has_any_keys": has_any}
 
 
 
@@ -401,7 +415,7 @@ async def upsert_chat_key_for_member(
         key_id=key_data.key_id,
         encrypted_chat_key=key_data.encrypted_chat_key,
         key_version=key_data.key_version,
-        backup_key_plaintext=key_data.backup_key_plaintext if user_id == current_user_id else None,
+        backup_key_plaintext=key_data.backup_key_plaintext,
     )
     return chat_key
 

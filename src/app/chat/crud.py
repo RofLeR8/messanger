@@ -682,12 +682,28 @@ async def get_chat_encrypted_key_for_user(
     db: AsyncSession,
     chat_id: int,
     user_id: int,
+    key_id: Optional[str] = None,
 ) -> Optional[ChatEncryptedKey]:
+    if key_id:
+        by_device_q = (
+            select(ChatEncryptedKey)
+            .where(
+                ChatEncryptedKey.chat_id == chat_id,
+                ChatEncryptedKey.user_id == user_id,
+                ChatEncryptedKey.key_id == key_id,
+            )
+            .where(ChatEncryptedKey.key_id != SERVER_BACKUP_KEY_ID)
+            .order_by(ChatEncryptedKey.key_version.desc(), ChatEncryptedKey.id.desc())
+        )
+        by_device = (await db.execute(by_device_q)).scalars().first()
+        if by_device:
+            return by_device
+
     q = (
         select(ChatEncryptedKey)
         .where(ChatEncryptedKey.chat_id == chat_id, ChatEncryptedKey.user_id == user_id)
         .where(ChatEncryptedKey.key_id != SERVER_BACKUP_KEY_ID)
-        .order_by(ChatEncryptedKey.key_version.desc(), ChatEncryptedKey.created_at.desc())
+        .order_by(ChatEncryptedKey.key_version.desc(), ChatEncryptedKey.id.desc())
     )
     return (await db.execute(q)).scalars().first()
 
@@ -715,6 +731,16 @@ async def delete_chat_encrypted_keys(db: AsyncSession, chat_id: int) -> None:
     for row in rows:
         await db.delete(row)
     await db.commit()
+
+
+async def chat_has_any_encrypted_keys(db: AsyncSession, chat_id: int) -> bool:
+    q = (
+        select(func.count(ChatEncryptedKey.id))
+        .where(ChatEncryptedKey.chat_id == chat_id)
+        .where(ChatEncryptedKey.key_id != SERVER_BACKUP_KEY_ID)
+    )
+    count = (await db.execute(q)).scalar() or 0
+    return count > 0
 
 
 # ==================== Group Chat Management ====================
