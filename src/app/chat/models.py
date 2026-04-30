@@ -94,6 +94,7 @@ class Chat(Base):
     name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_group: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    photo_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # Last message tracking
     last_message_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("messages.id"), nullable=True)

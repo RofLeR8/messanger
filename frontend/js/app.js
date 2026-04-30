@@ -44,6 +44,7 @@ let contextChatId = null;
 
 // Group members cache
 let currentChatMembers = []; // Cached members of current chat
+let pendingGroupPhotoUrl = null;
 
 // DOM Elements
 const authSection = document.getElementById('auth-section');
@@ -147,6 +148,8 @@ const groupChatForm = document.getElementById('group-chat-form');
 const groupChatNameInput = document.getElementById('group-chat-name');
 const groupMembersSelect = document.getElementById('group-members-select');
 const closeGroupModalBtn = document.getElementById('close-group-modal-btn');
+const groupPhotoPreview = document.getElementById('group-photo-preview');
+const groupPhotoUploadInput = document.getElementById('group-photo-upload-input');
 
 // Group members panel
 const groupMembersPanel = document.getElementById('group-members-panel');
@@ -155,7 +158,12 @@ const closeMembersPanelBtn = document.getElementById('close-members-panel-btn');
 const addMemberEmailInput = document.getElementById('add-member-email');
 const addMemberBtn = document.getElementById('add-member-btn');
 const leaveGroupBtn = document.getElementById('leave-group-btn');
+const groupEditSection = document.getElementById('group-edit-section');
 const addMemberSection = document.getElementById('group-add-member-section');
+const groupEditNameInput = document.getElementById('group-edit-name');
+const groupEditPhotoPreview = document.getElementById('group-edit-photo-preview');
+const groupEditPhotoUploadInput = document.getElementById('group-edit-photo-upload-input');
+const saveGroupNameBtn = document.getElementById('save-group-name-btn');
 const leaveGroupSection = document.getElementById('leave-group-section');
 
 // Utility Functions
@@ -720,14 +728,12 @@ async function navigateToChat(chatId, chatName, isGroup) {
     if (isGroup) {
         chatHeaderStatus.innerHTML = '';
         chatHeaderStatus.classList.remove('online');
-        if (chatHeaderAvatar) {
-            chatHeaderAvatar.classList.add('hidden');
-            chatHeaderAvatar.removeAttribute('data-user-id');
-            chatHeaderAvatar.classList.remove('user-clickable');
-        }
+        const activeChatItem = document.querySelector(`.chat-item[data-chat-id="${chatId}"] .chat-item-avatar img`);
+        renderChatHeaderAvatar(activeChatItem ? activeChatItem.getAttribute('src') : null);
         chatTitle.classList.remove('user-clickable');
         chatTitle.removeAttribute('data-user-id');
     } else {
+        if (chatHeaderAvatar) chatHeaderAvatar.classList.add('hidden');
         // For direct chats, show loading then update with actual status
         chatHeaderStatus.innerHTML = '<span class="offline-dot"></span> Loading...';
         if (chatHeaderAvatar) {
@@ -1485,11 +1491,11 @@ async function createDirectChat(friendId) {
     return await response.json();
 }
 
-async function createGroupChat(name, memberIds) {
+async function createGroupChat(name, memberIds, photoUrl = null) {
     const response = await fetch(`${API_BASE_URL}/chats/group`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-        body: JSON.stringify({ name, member_ids: memberIds }),
+        body: JSON.stringify({ name, member_ids: memberIds, photo_url: photoUrl || null }),
     });
     if (!response.ok) {
         const error = await response.json();
@@ -1671,9 +1677,11 @@ function handleWsMessage(data) {
             break;
 
         case 'chat_updated':
-            if (data.name && currentChatId === data.chat_id) {
-                chatTitle.textContent = data.name;
+            if (currentChatId === data.chat_id) {
+                if (data.name) chatTitle.textContent = data.name;
+                if (currentChatIsGroup && data.photo_url) renderChatHeaderAvatar(data.photo_url);
             }
+            refreshChats();
             break;
     }
 }
@@ -1838,7 +1846,9 @@ function renderChats(chats, animate = true) {
             chatName = chat.name || 'Group Chat';
             chatNamesCache[chat.id] = chatName;
             subtitle = `${chat.members_count || 0} members`;
-            avatarHtml = `<div class="chat-item-avatar">👥</div>`;
+            avatarHtml = chat.photo_url
+                ? `<div class="chat-item-avatar"><img src="${escapeHtml(chat.photo_url)}" alt="Group"></div>`
+                : `<div class="chat-item-avatar">👥</div>`;
             nameHtml = `<div class="chat-item-name">${escapeHtml(chatName)}</div>`;
         } else {
             chatName = chatNamesCache[chat.id];
@@ -2165,6 +2175,19 @@ function updateChatItemOnlineStatus(userId, isOnline) {
         dot.className = 'status-dot online';
         nameEl.insertBefore(dot, nameEl.firstChild);
     }
+}
+
+
+function renderChatHeaderAvatar(avatarUrl = null, fallback = '👥') {
+    if (!chatHeaderAvatar) return;
+    if (avatarUrl) {
+        chatHeaderAvatar.innerHTML = `<img src="${escapeHtml(avatarUrl)}" alt="Avatar">`;
+    } else {
+        chatHeaderAvatar.textContent = fallback;
+    }
+    chatHeaderAvatar.classList.remove('hidden');
+    chatHeaderAvatar.classList.remove('user-clickable');
+    chatHeaderAvatar.removeAttribute('data-user-id');
 }
 
 function updateUserOnlineStatus(userId) {
@@ -2687,8 +2710,8 @@ async function loadChatMembersPanel(chatId) {
         // Show/hide add member section based on admin role
         const me = members.find(m => m.user_id === currentUserId);
         const isAdmin = me && me.role === 'admin';
-        if (isAdmin) showElement(addMemberSection);
-        else hideElement(addMemberSection);
+        if (isAdmin) { showElement(addMemberSection); showElement(groupEditSection); }
+        else { hideElement(addMemberSection); hideElement(groupEditSection); }
 
         // Show leave group button
         showElement(leaveGroupSection);
@@ -2798,6 +2821,8 @@ async function renderFriendCheckboxes() {
 function openGroupChatModal() {
     showElement(groupChatModal);
     groupChatNameInput.value = '';
+    pendingGroupPhotoUrl = null;
+    if (groupPhotoPreview) groupPhotoPreview.textContent = '👥';
     renderMemberCheckboxes();
 }
 function closeGroupChatModal() { hideElement(groupChatModal); groupChatForm.reset(); }
@@ -2830,6 +2855,33 @@ async function renderMemberCheckboxes() {
             groupMembersSelect.appendChild(wrapper);
         });
     } catch (error) { console.error('Error loading friends for group creation:', error); }
+}
+
+
+async function updateGroupChatSettings(chatId, payload) {
+    const response = await fetch(`${API_BASE_URL}/chats/${chatId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to update group');
+    }
+    return await response.json();
+}
+
+
+function renderGroupPhotoPreview(targetEl, photoUrl) {
+    if (!targetEl) return;
+    if (photoUrl) targetEl.innerHTML = `<img src="${escapeHtml(photoUrl)}" alt="Group photo">`;
+    else targetEl.textContent = '👥';
+}
+
+async function handleGroupPhotoUpload(file, onUploaded) {
+    const result = await uploadAvatarFile(file);
+    const photoUrl = result.file_url;
+    await onUploaded(photoUrl);
 }
 
 // ==================== Event Listeners ====================
@@ -2888,16 +2940,59 @@ groupChatForm.addEventListener('submit', async (e) => {
     if (!name) { alert('Please enter a group name'); return; }
 
     const selectedMembers = Array.from(groupMembersSelect.querySelectorAll('input[type="checkbox"]:checked')).map(cb => parseInt(cb.value));
+    const photoUrl = pendingGroupPhotoUrl || null;
     if (selectedMembers.length === 0) { alert('Please select at least one member'); return; }
 
     try {
-        const chat = await createGroupChat(name, selectedMembers);
+        const chat = await createGroupChat(name, selectedMembers, photoUrl);
         closeGroupChatModal();
         await loadChats();
         navigateToChat(chat.id, name, true);
         loadChatMembersPanel(chat.id);
     } catch (error) { alert('Failed to create group: ' + error.message); }
 });
+
+
+if (saveGroupNameBtn) {
+    saveGroupNameBtn.addEventListener('click', async () => {
+        const name = groupEditNameInput?.value?.trim();
+        if (!name || !currentChatId) return;
+        try {
+            await updateGroupChatSettings(currentChatId, { name });
+            chatTitle.textContent = name;
+            groupEditNameInput.value = '';
+            await loadChats();
+        } catch (error) { alert('Failed to update group name: ' + error.message); }
+    });
+}
+
+
+if (groupPhotoUploadInput) {
+    groupPhotoUploadInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+            pendingGroupPhotoUrl = (await uploadAvatarFile(file)).file_url;
+            renderGroupPhotoPreview(groupPhotoPreview, pendingGroupPhotoUrl);
+        } catch (error) { alert('Failed to upload group photo: ' + error.message); }
+        groupPhotoUploadInput.value = '';
+    });
+}
+
+if (groupEditPhotoUploadInput) {
+    groupEditPhotoUploadInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file || !currentChatId) return;
+        try {
+            const photo_url = (await uploadAvatarFile(file)).file_url;
+            await updateGroupChatSettings(currentChatId, { photo_url });
+            renderGroupPhotoPreview(groupEditPhotoPreview, photo_url);
+            renderChatHeaderAvatar(photo_url);
+            await loadChats();
+        } catch (error) { alert('Failed to update group photo: ' + error.message); }
+        groupEditPhotoUploadInput.value = '';
+    });
+}
 
 // Message input and send
 messageInput.addEventListener('input', handleTypingInput);
