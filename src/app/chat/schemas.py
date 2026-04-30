@@ -68,6 +68,7 @@ class SChatRead(BaseModel):
     name: Optional[str] = Field(None, description="Chat name (for group chats)")
     is_group: bool = Field(False, description="Is this a group chat")
     created_by: Optional[int] = Field(None, description="User who created the chat")
+    photo_url: Optional[str] = Field(None, description="Group chat photo URL")
     last_message_id: Optional[int] = Field(None, description="Last message id")
     last_message_at: Optional[datetime] = Field(None, description="Last message timestamp")
     last_message_content: Optional[str] = Field(None, description="Last message content")
@@ -125,10 +126,20 @@ class WSReadReceipt(BaseModel):
 
 # ==================== Group Chat Schemas ====================
 
+
+
+class SInitialMemberKey(BaseModel):
+    user_id: int = Field(..., description="Group member user id")
+    key_id: str = Field(..., min_length=1, max_length=128)
+    encrypted_chat_key: str = Field(..., min_length=1)
+    key_version: int = Field(default=1, ge=1)
+
 class SGroupChatCreate(BaseModel):
     """Schema for creating a group chat."""
     name: str = Field(..., description="Group chat name", min_length=1, max_length=255)
     member_ids: List[int] = Field(..., description="List of user IDs to add as members", min_length=1)
+    photo_url: Optional[str] = Field(None, description="Group chat photo URL")
+    encrypted_keys: Optional[List[SInitialMemberKey]] = Field(None, description="Optional encrypted chat keys for members")
 
 
 class SChatMemberRead(BaseModel):
@@ -154,6 +165,7 @@ class SChatMemberAdd(BaseModel):
 class SChatUpdate(BaseModel):
     """Schema for updating a group chat."""
     name: Optional[str] = Field(None, description="New chat name", min_length=1, max_length=255)
+    photo_url: Optional[str] = Field(None, description="New group chat photo URL")
 
 
 class SChatDetail(BaseModel):
@@ -162,6 +174,7 @@ class SChatDetail(BaseModel):
     name: Optional[str] = Field(None, description="Chat name (for group chats)")
     is_group: bool = Field(False, description="Is this a group chat")
     created_by: Optional[int] = Field(None, description="User who created the chat")
+    photo_url: Optional[str] = Field(None, description="Group chat photo URL")
     last_message_id: Optional[int] = Field(None, description="Last message id")
     last_message_at: Optional[datetime] = Field(None, description="Last message timestamp")
     last_message_content: Optional[str] = Field(None, description="Last message content")

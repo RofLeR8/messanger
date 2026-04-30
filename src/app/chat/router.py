@@ -27,7 +27,7 @@ from app.chat.crud import (
     add_member_to_chat,
     leave_group_chat,
     kick_member,
-    update_chat_name,
+    update_group_chat,
     get_member_role,
     upsert_chat_encrypted_key,
     get_chat_encrypted_key_for_user,
@@ -107,6 +107,7 @@ async def get_chats_list(db: AsyncSession = Depends(get_db), user: User = Depend
             name=chat.name,
             is_group=chat.is_group,
             created_by=chat.created_by,
+        photo_url=chat.photo_url,
             last_message_id=last_message.id if last_message else None,
             last_message_at=last_message.created_at.isoformat() if last_message and last_message.created_at else None,
             last_message_content=(
@@ -169,7 +170,20 @@ async def create_new_group_chat(
             )
 
     # Create group chat
-    new_chat = await create_group_chat(db, current_user_id, group_data.name, group_data.member_ids)
+    new_chat = await create_group_chat(db, current_user_id, group_data.name, group_data.member_ids, group_data.photo_url)
+
+    if group_data.encrypted_keys:
+        for member_key in group_data.encrypted_keys:
+            if member_key.user_id != current_user_id and member_key.user_id not in group_data.member_ids:
+                raise HTTPException(status_code=400, detail=f"User {member_key.user_id} is not in member_ids")
+            await upsert_chat_encrypted_key(
+                db,
+                chat_id=new_chat.id,
+                user_id=member_key.user_id,
+                key_id=member_key.key_id,
+                encrypted_chat_key=member_key.encrypted_chat_key,
+                key_version=member_key.key_version,
+            )
 
     # Send notification to all new members
     for member_id in group_data.member_ids:
@@ -181,7 +195,7 @@ async def create_new_group_chat(
                 "added_by": current_user_id,
             }, member_id)
 
-    return {"id": new_chat.id, "name": new_chat.name, "is_group": True}
+    return {"id": new_chat.id, "name": new_chat.name, "photo_url": new_chat.photo_url, "is_group": True}
 
 
 # ==================== Chat Details ====================
@@ -213,6 +227,7 @@ async def get_chat_details(
         name=chat.name,
         is_group=chat.is_group,
         created_by=chat.created_by,
+        photo_url=chat.photo_url,
         last_message_id=last_message.id if last_message else None,
         last_message_at=last_message.created_at if last_message and last_message.created_at else None,
         last_message_content=(
@@ -251,14 +266,15 @@ async def update_chat(
             detail="Cannot update a direct chat"
         )
 
-    if chat_update.name is not None:
-        await update_chat_name(db, chat_id, chat_update.name)
+    if chat_update.name is not None or chat_update.photo_url is not None:
+        await update_group_chat(db, chat_id, name=chat_update.name, photo_url=chat_update.photo_url)
 
     # Broadcast update to all members
     await manager.broadcast_to_chat({
         "type": "chat_updated",
         "chat_id": chat_id,
-        "name": chat_update.name,
+        "name": chat_update.name if chat_update.name is not None else chat.name,
+        "photo_url": chat_update.photo_url if chat_update.photo_url is not None else chat.photo_url,
     }, chat_id)
 
     return {"success": True}
