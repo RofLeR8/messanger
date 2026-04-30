@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 import secrets
 import hashlib
-import base64
 import os
 
 
