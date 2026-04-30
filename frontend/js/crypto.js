@@ -77,7 +77,8 @@
     function saveChatKey(chatId, keyVersion, key) {
         const str = localStorage.getItem(STORE_CHAT_KEYS);
         const parsed = str ? JSON.parse(str) : {};
-        parsed[chatId] = { keyVersion, key };
+        parsed[chatId] = parsed[chatId] || {};
+        parsed[chatId][String(keyVersion)] = key;
         localStorage.setItem(STORE_CHAT_KEYS, JSON.stringify(parsed));
     }
 
@@ -88,9 +89,30 @@
         const parsed = JSON.parse(str);
         if (!parsed[chatId]) return null;
         chatKeyCache.set(chatId, parsed[chatId]);
-        return parsed[chatId];
+        const versions = Object.keys(parsed[chatId]).map(v => Number(v)).filter(v => Number.isFinite(v));
+        if (versions.length === 0) return null;
+        const latest = Math.max(...versions);
+        return { keyVersion: latest, key: parsed[chatId][String(latest)] };
     }
 
+
+
+    function parseKeyVersion(encryptionVersion) {
+        if (!encryptionVersion || typeof encryptionVersion !== 'string') return null;
+        const parts = encryptionVersion.split(':');
+        if (parts.length < 2) return null;
+        const n = Number(parts[1]);
+        return Number.isFinite(n) && n > 0 ? n : null;
+    }
+
+    function loadChatKeyByVersion(chatId, keyVersion) {
+        const str = localStorage.getItem(STORE_CHAT_KEYS);
+        if (!str) return null;
+        const parsed = JSON.parse(str);
+        const chatMap = parsed[chatId];
+        if (!chatMap || !chatMap[String(keyVersion)]) return null;
+        return { keyVersion, key: chatMap[String(keyVersion)] };
+    }
     function removeChatKey(chatId) {
         chatKeyCache.delete(chatId);
         const str = localStorage.getItem(STORE_CHAT_KEYS);
@@ -290,7 +312,9 @@
 
     async function decryptPayload(chatId, payload) {
         if (!payload) return null;
-        const chatKey = loadChatKey(chatId);
+        const payloadVersion = parseKeyVersion(payload?.encryption_version);
+        let chatKey = payloadVersion ? loadChatKeyByVersion(chatId, payloadVersion) : null;
+        if (!chatKey) chatKey = loadChatKey(chatId);
         if (!chatKey) return null;
         debugLog('message.decrypt.start', {
             chatId,
@@ -347,5 +371,6 @@
         encryptFile,
         decryptFile,
         loadChatKey,
+        loadChatKeyByVersion,
     };
 })(window);

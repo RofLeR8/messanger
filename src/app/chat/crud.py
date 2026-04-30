@@ -683,6 +683,7 @@ async def get_chat_encrypted_key_for_user(
     chat_id: int,
     user_id: int,
     key_id: Optional[str] = None,
+    key_version: Optional[int] = None,
 ) -> Optional[ChatEncryptedKey]:
     if key_id:
         by_device_q = (
@@ -693,6 +694,7 @@ async def get_chat_encrypted_key_for_user(
                 ChatEncryptedKey.key_id == key_id,
             )
             .where(ChatEncryptedKey.key_id != SERVER_BACKUP_KEY_ID)
+            .where(ChatEncryptedKey.key_version == key_version if key_version is not None else True)
             .order_by(ChatEncryptedKey.key_version.desc(), ChatEncryptedKey.id.desc())
         )
         by_device = (await db.execute(by_device_q)).scalars().first()
@@ -703,6 +705,7 @@ async def get_chat_encrypted_key_for_user(
         select(ChatEncryptedKey)
         .where(ChatEncryptedKey.chat_id == chat_id, ChatEncryptedKey.user_id == user_id)
         .where(ChatEncryptedKey.key_id != SERVER_BACKUP_KEY_ID)
+        .where(ChatEncryptedKey.key_version == key_version if key_version is not None else True)
         .order_by(ChatEncryptedKey.key_version.desc(), ChatEncryptedKey.id.desc())
     )
     return (await db.execute(q)).scalars().first()
