@@ -10,11 +10,36 @@ class SUserRegister(BaseModel):
     password_check: str = Field(..., max_length=30, min_length=5)
     name: str = Field(..., max_length=30)
     username: Optional[str] = Field(None, max_length=30)
+    # Account encryption key for multi-device sync (encrypted with password-derived key)
+    account_key_cipher: Optional[str] = Field(None, description="Base64-encoded encrypted account key")
+    account_key_nonce: Optional[str] = Field(None, description="Nonce for account key encryption")
+    account_key_salt: Optional[str] = Field(None, description="Salt for password derivation")
 
 
 class SUserAuth(BaseModel):
     email: EmailStr = Field(..., description="Email")
     password: str = Field(..., max_length=30, min_length=5)
+    device_name: Optional[str] = Field(None, max_length=255, description="Device name for session")
+    device_info: Optional[str] = Field(None, description="Device info (user agent, IP, etc.)")
+
+
+class SUserSessionCreate(BaseModel):
+    device_name: Optional[str] = Field(None, max_length=255)
+    device_info: Optional[str] = None
+
+
+class SUserSessionRead(BaseModel):
+    id: int
+    user_id: int
+    device_name: Optional[str] = None
+    device_info: Optional[str] = None
+    created_at: datetime
+    last_active_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    is_revoked: bool = False
+
+    class Config:
+        from_attributes = True
 
 
 class SUserProfile(BaseModel):
@@ -81,6 +106,14 @@ class SUserPublicKeyRead(BaseModel):
     algorithm: str
     public_key: str
     revoked_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+
+class SAccountKeyUpdate(BaseModel):
+    """Schema for updating account encryption key (for password change)."""
+    account_key_cipher: str = Field(..., description="Base64-encoded encrypted account key")
+    account_key_nonce: str = Field(..., description="Nonce for account key encryption")
+    account_key_salt: str = Field(..., description="Salt for password derivation")
