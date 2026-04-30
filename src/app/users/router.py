@@ -44,10 +44,14 @@ async def auth_user(response: Response, user_data: SUserAuth, db: AsyncSession =
     if check is None:
         raise IncorrectEmailOrPasswordException
     
+    user_id = check.id
+    account_key_nonce = check.account_key_nonce
+    account_key_salt = check.account_key_salt
+
     # Create a new session for this device
     session = await create_user_session(
         db=db,
-        user_id=check.id,
+        user_id=user_id,
         device_name=user_data.device_name,
         device_info=user_data.device_info,
     )
@@ -56,7 +60,7 @@ async def auth_user(response: Response, user_data: SUserAuth, db: AsyncSession =
     account_key = await decrypt_account_key(check, user_data.password)
     account_key_base64 = decode_account_key_to_base64(account_key) if account_key else None
     
-    access_token = create_access_token({"sub": str(check.id)}, session_token=session.session_token)
+    access_token = create_access_token({"sub": str(user_id)}, session_token=session.session_token)
     response.set_cookie(key="user_access_token", value=access_token, httponly=True)
     
     return {
@@ -65,8 +69,8 @@ async def auth_user(response: Response, user_data: SUserAuth, db: AsyncSession =
         "refresh_token": None,
         "message": "Authorization successful",
         "account_key": account_key_base64,
-        "account_key_nonce": check.account_key_nonce,
-        "account_key_salt": check.account_key_salt,
+        "account_key_nonce": account_key_nonce,
+        "account_key_salt": account_key_salt,
         "session_id": session.id,
     }
 
