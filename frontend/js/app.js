@@ -3,6 +3,7 @@ const API_BASE_URL = '';
 
 // State
 let authToken = null;
+let currentSessionId = null;
 let currentChatId = null;
 let currentUserId = null;
 let websocket = null;
@@ -103,6 +104,10 @@ const attachFileBtn = document.getElementById('attach-file-btn');
 const chatsPage = document.getElementById('chats-page');
 const chatPage = document.getElementById('chat-page');
 const uiScaleSelect = document.getElementById('ui-scale-select');
+const refreshSessionsBtn = document.getElementById('refresh-sessions-btn');
+const revokeOtherSessionsBtn = document.getElementById('revoke-other-sessions-btn');
+const sessionsStatus = document.getElementById('sessions-status');
+const sessionsList = document.getElementById('sessions-list');
 
 // Modals
 const directChatModal = document.getElementById('direct-chat-modal');
@@ -843,6 +848,8 @@ function switchToTab(tab) {
 
     if (tab === 'friends') {
         loadFriendsPage();
+    } else if (tab === 'settings') {
+        loadSessionsSettings();
     }
 }
 
@@ -1080,28 +1087,142 @@ async function searchUserAndRender() {
 
 // ==================== Auth Functions ====================
 async function login(email, password) {
+    // Get device info for session
+    const deviceName = navigator.userAgent.includes('Mobile') ? 'Mobile Device' : 'Desktop';
+    const deviceInfo = navigator.userAgent;
+    
     const response = await fetch(`${API_BASE_URL}/auth/login/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ 
+            email, 
+            password,
+            device_name: deviceName,
+            device_info: deviceInfo,
+        }),
         credentials: 'include',
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Login failed');
+    
     authToken = data.access_token;
+    currentSessionId = data.session_id ?? null;
     localStorage.setItem('authToken', authToken);
+    if (currentSessionId != null) localStorage.setItem('currentSessionId', String(currentSessionId));
+    
+    // Store account encryption key for multi-device sync
+    if (data.account_key) {
+        localStorage.setItem('accountKey', data.account_key);
+        localStorage.setItem('accountKeyNonce', data.account_key_nonce || '');
+        localStorage.setItem('accountKeySalt', data.account_key_salt || '');
+    }
+    
     return true;
 }
 
 async function register(email, name, username, password, passwordCheck) {
+    // Generate account encryption key on client side for first registration
+    const accountKey = await generateAccountKey();
+    
     const response = await fetch(`${API_BASE_URL}/auth/register/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name, username: username || null, password, password_check: passwordCheck }),
+        body: JSON.stringify({ 
+            email, 
+            name, 
+            username: username || null, 
+            password, 
+            password_check: passwordCheck,
+            account_key_cipher: accountKey.cipher,
+            account_key_nonce: accountKey.nonce,
+            account_key_salt: accountKey.salt,
+        }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Registration failed');
     return true;
+}
+
+/**
+ * Generate account encryption key for multi-device sync.
+ * Creates a random 256-bit key and encrypts it with password-derived key.
+ */
+async function generateAccountKey() {
+    // Generate random 256-bit account key
+    const accountKeyBytes = crypto.getRandomValues(new Uint8Array(32));
+    
+    // Generate random salt for PBKDF2
+    const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+    const saltHex = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    // Derive key from password using PBKDF2 via Web Crypto API
+    const encoder = new TextEncoder();
+    const passwordData = encoder.encode(document.getElementById('register-password').value);
+    
+    // Import password as key material
+    const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        passwordData,
+        { name: 'PBKDF2' },
+        false,
+        ['deriveBits']
+    );
+    
+    // Derive 256 bits using PBKDF2
+    const derivedBits = await crypto.subtle.deriveBits(
+        {
+            name: 'PBKDF2',
+            salt: saltBytes,
+            iterations: 100000,
+            hash: 'SHA-256',
+        },
+        keyMaterial,
+        256
+    );
+    
+    // XOR account key with derived key (simple encryption)
+    const derivedKey = new Uint8Array(derivedBits);
+    const encryptedKey = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) {
+        encryptedKey[i] = accountKeyBytes[i] ^ derivedKey[i];
+    }
+    
+    // Convert to base64
+    const cipherBase64 = arrayBufferToBase64(encryptedKey.buffer);
+    
+    // Generate nonce (not used in XOR but stored for compatibility)
+    const nonceBytes = crypto.getRandomValues(new Uint8Array(12));
+    const nonceHex = Array.from(nonceBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    return {
+        cipher: cipherBase64,
+        nonce: nonceHex,
+        salt: saltHex,
+    };
+}
+
+/**
+ * Convert ArrayBuffer to base64 string.
+ */
+function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+/**
+ * Convert base64 string to ArrayBuffer.
+ */
+function base64ToArrayBuffer(base64) {
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
 }
 
 async function logout() {
@@ -1111,6 +1232,12 @@ async function logout() {
     finally {
         authToken = null;
         localStorage.removeItem('authToken');
+        localStorage.removeItem('currentSessionId');
+        currentSessionId = null;
+        // Clear account encryption keys
+        localStorage.removeItem('accountKey');
+        localStorage.removeItem('accountKeyNonce');
+        localStorage.removeItem('accountKeySalt');
         if (websocket) { websocket.close(); websocket = null; }
         if (notificationWs) { notificationWs.close(); notificationWs = null; }
         // Reset caches
@@ -1128,6 +1255,96 @@ async function handleUnauthorizedSession() {
 }
 
 // ==================== API Functions ====================
+async function getMySessions() {
+    const response = await fetch(`${API_BASE_URL}/auth/sessions/`, {
+        headers: { 'Authorization': `Bearer ${authToken}` },
+        credentials: 'include',
+    });
+    if (response.status === 401 || response.status === 403) throw new Error('Unauthorized');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to load sessions');
+    return data;
+}
+
+async function revokeSessionById(sessionId) {
+    const response = await fetch(`${API_BASE_URL}/auth/sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${authToken}` },
+        credentials: 'include',
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to revoke session');
+    return data;
+}
+
+async function revokeAllMySessions() {
+    const response = await fetch(`${API_BASE_URL}/auth/sessions/revoke-all`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` },
+        credentials: 'include',
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to revoke sessions');
+    return data;
+}
+
+function formatSessionDate(value) {
+    if (!value) return '—';
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
+}
+
+function renderSessions(sessions) {
+    if (!sessionsList) return;
+    sessionsList.innerHTML = '';
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+        sessionsList.innerHTML = '<div class="session-meta">No active sessions.</div>';
+        return;
+    }
+    sessions.forEach((session) => {
+        const isCurrent = currentSessionId != null && Number(session.id) === Number(currentSessionId);
+        const item = document.createElement('div');
+        item.className = 'session-item';
+        item.innerHTML = `
+            <div class="session-item-header">
+                <div class="session-item-title">${escapeHtml(session.device_name || 'Unknown device')}${isCurrent ? ' (current)' : ''}</div>
+                <button class="btn btn-icon btn-sm" ${isCurrent ? 'disabled title="Current session"' : ''} data-revoke-session-id="${session.id}">✕</button>
+            </div>
+            <div class="session-meta">${escapeHtml(session.device_info || 'No device info')}</div>
+            <div class="session-meta">Created: ${formatSessionDate(session.created_at)} · Last active: ${formatSessionDate(session.last_active_at)}</div>
+        `;
+        sessionsList.appendChild(item);
+    });
+
+    sessionsList.querySelectorAll('[data-revoke-session-id]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const sessionId = Number(btn.dataset.revokeSessionId);
+            if (!sessionId || !confirm('Close this session?')) return;
+            try {
+                await revokeSessionById(sessionId);
+                await loadSessionsSettings();
+            } catch (error) {
+                if (sessionsStatus) sessionsStatus.textContent = error.message;
+            }
+        });
+    });
+}
+
+async function loadSessionsSettings() {
+    if (!sessionsStatus) return;
+    sessionsStatus.textContent = 'Loading sessions...';
+    try {
+        const sessions = await getMySessions();
+        renderSessions(sessions);
+        sessionsStatus.textContent = `Active sessions: ${sessions.length}`;
+    } catch (error) {
+        sessionsStatus.textContent = error.message;
+        if (String(error.message).includes('Unauthorized')) {
+            await handleUnauthorizedSession();
+        }
+    }
+}
+
 async function getChats() {
     const response = await fetch(`${API_BASE_URL}/chats/?t=${Date.now()}`, {
         headers: { 'Authorization': `Bearer ${authToken}` },
@@ -2810,6 +3027,21 @@ if (tabFriends) {
 if (tabSettings) {
     tabSettings.addEventListener('click', () => switchToTab('settings'));
 }
+if (refreshSessionsBtn) {
+    refreshSessionsBtn.addEventListener('click', () => loadSessionsSettings());
+}
+if (revokeOtherSessionsBtn) {
+    revokeOtherSessionsBtn.addEventListener('click', async () => {
+        if (!confirm('Close all other sessions?')) return;
+        try {
+            const result = await revokeAllMySessions();
+            if (sessionsStatus) sessionsStatus.textContent = `Revoked: ${result.revoked_count ?? 0}`;
+            await loadSessionsSettings();
+        } catch (error) {
+            if (sessionsStatus) sessionsStatus.textContent = error.message;
+        }
+    });
+}
 
 // ==================== Friends Sub-tabs ====================
 if (friendsTabAll) {
@@ -3007,6 +3239,8 @@ if (avatarUploadInput) {
 window.addEventListener('DOMContentLoaded', async () => {
     initUiScaleSettings();
     const savedToken = localStorage.getItem('authToken');
+    const savedSessionId = localStorage.getItem('currentSessionId');
+    if (savedSessionId) currentSessionId = Number(savedSessionId);
     if (savedToken) {
         authToken = savedToken;
         const currentUser = await getCurrentUserInfo();
