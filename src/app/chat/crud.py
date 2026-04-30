@@ -205,12 +205,13 @@ async def create_direct_chat(db: AsyncSession, user_id_1: int, user_id_2: int):
     return db_chat
 
 
-async def create_group_chat(db: AsyncSession, created_by: int, name: str, member_ids: List[int]):
+async def create_group_chat(db: AsyncSession, created_by: int, name: str, member_ids: List[int], photo_url: Optional[str] = None):
     """Create a group chat with the creator and specified members."""
     db_chat = Chat(
         name=name,
         is_group=True,
         created_by=created_by,
+        photo_url=photo_url,
     )
     db.add(db_chat)
     try:
@@ -240,11 +241,14 @@ async def create_group_chat(db: AsyncSession, created_by: int, name: str, member
     return db_chat
 
 
-async def update_chat_name(db: AsyncSession, chat_id: int, name: str) -> Optional[Chat]:
-    """Update chat name."""
+async def update_group_chat(db: AsyncSession, chat_id: int, name: Optional[str] = None, photo_url: Optional[str] = None) -> Optional[Chat]:
+    """Update chat fields."""
     chat = await get_chat_by_id(db, chat_id)
     if chat:
-        chat.name = name
+        if name is not None:
+            chat.name = name
+        if photo_url is not None:
+            chat.photo_url = photo_url
         await db.commit()
         await db.refresh(chat)
     return chat

@@ -396,6 +396,10 @@
                         <input type="text" id="group-chat-name" required placeholder="Enter group name" minlength="1" maxlength="255">
                     </div>
                     <div class="form-group">
+                        <label for="group-chat-photo">Group photo URL <span style="color:var(--text-secondary);font-size:0.8rem;">(optional)</span></label>
+                        <input type="url" id="group-chat-photo" placeholder="https://...">
+                    </div>
+                    <div class="form-group">
                         <label>Select members</label>
                         <div id="group-members-select" class="member-select-container">
                             <!-- Checkboxes will be rendered here -->
@@ -420,6 +424,16 @@
             </div>
             <div id="group-members-list" class="group-members-list">
                 <!-- Members will be rendered here -->
+            </div>
+            <div id="group-edit-section" class="group-add-member-section hidden">
+                <div class="input-with-button" style="margin-bottom:10px;">
+                    <input type="text" id="group-edit-name" placeholder="New group name" class="input-field input-small">
+                    <button id="save-group-name-btn" class="btn btn-secondary btn-sm">Save</button>
+                </div>
+                <div class="input-with-button" style="margin-bottom:10px;">
+                    <input type="url" id="group-edit-photo" placeholder="New photo URL" class="input-field input-small">
+                    <button id="save-group-photo-btn" class="btn btn-secondary btn-sm">Save</button>
+                </div>
             </div>
             <div id="group-add-member-section" class="group-add-member-section hidden">
                 <div class="input-with-button">
