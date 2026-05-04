@@ -1755,7 +1755,6 @@ function updateChatMembersCount(chatId) {
         // Silently fail if we can't access members (e.g., we were removed)
     });
 }
-}
 
 // Automatic key rotation handler
 async function handleKeyRotation(chatId) {
