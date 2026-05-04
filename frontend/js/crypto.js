@@ -227,13 +227,14 @@
                 if (recoverResp.ok) {
                     const recovered = await recoverResp.json();
                     const recoveredBase64 = recovered.chat_key_plaintext;
-                    saveChatKey(chatId, recovered.key_version || 1, recoveredBase64);
-                    chatKeyCache.set(chatId, { keyVersion: recovered.key_version || 1, key: recoveredBase64 });
+                    const keyVersion = recovered.key_version || 1;
+                    saveChatKey(chatId, keyVersion, recoveredBase64);
+                    chatKeyCache.set(chatId, { keyVersion, key: recoveredBase64 });
                     try {
-                        await shareChatKeyToUser(chatId, currentUserId, authToken, recoveredBase64, recovered.key_version || 1, true);
+                        await shareChatKeyToUser(chatId, currentUserId, authToken, recoveredBase64, keyVersion, true);
                     } catch (_) {}
-                    debugLog('chat_key.ensure.recover_success', { chatId, keyVersion: recovered.key_version || 1, myKeyId: pair.keyId });
-                    return { keyVersion: recovered.key_version || 1, key: recoveredBase64 };
+                    debugLog('chat_key.ensure.recover_success', { chatId, keyVersion, myKeyId: pair.keyId });
+                    return { keyVersion, key: recoveredBase64 };
                 }
                 const wrapped = new Error('CHAT_KEY_MISMATCH');
                 wrapped.cause = error;
@@ -257,14 +258,16 @@
                     const recoverResp = await fetch(`/chats/${chatId}/keys/me/recover`, {
                         headers: { Authorization: `Bearer ${authToken}` },
                     });
-                    if (recoverResp.ok) {
+if (recoverResp.ok) {
                         const recovered = await recoverResp.json();
                         const recoveredBase64 = recovered.chat_key_plaintext;
                         const keyVersion = recovered.key_version || 1;
                         saveChatKey(chatId, keyVersion, recoveredBase64);
                         chatKeyCache.set(chatId, { keyVersion, key: recoveredBase64 });
+                        try {
+                            await shareChatKeyToUser(chatId, currentUserId, authToken, recoveredBase64, keyVersion, true);
+                        } catch (_) {}
                         debugLog('chat_key.ensure.recover_success', { chatId, keyVersion, myKeyId: pair.keyId });
-                        await shareChatKeyToUser(chatId, currentUserId, authToken, recoveredBase64, keyVersion, true);
                         return { keyVersion, key: recoveredBase64 };
                     }
                 } catch (e) {
@@ -326,6 +329,12 @@
     async function encryptText(chatId, content, extraAad = null) {
         const chatKey = loadChatKey(chatId);
         if (!chatKey) throw new Error('Missing chat key');
+        debugLog('message.encrypt.start', {
+            chatId,
+            keyVersion: chatKey.keyVersion,
+            contentLength: content?.length || 0,
+            keyPreview: chatKey.key.substring(0, 16) + '...',
+        });
         const key = await importAesKey(chatKey.key);
         const nonce = crypto.getRandomValues(new Uint8Array(12));
         const aadBytes = extraAad ? textEncoder.encode(JSON.stringify(extraAad)) : null;
@@ -334,6 +343,7 @@
             algo.additionalData = aadBytes;
         }
         const encrypted = await crypto.subtle.encrypt(algo, key, textEncoder.encode(content));
+        debugLog('message.encrypt.success', { chatId, keyVersion: chatKey.keyVersion });
         return {
             ciphertext: toBase64(new Uint8Array(encrypted)),
             nonce: toBase64(nonce),
@@ -355,6 +365,7 @@
             senderKeyId: payload?.sender_key_id || null,
             encryptionVersion: payload?.encryption_version || null,
             hasAad: Boolean(payload?.aad),
+            keyPreview: chatKey.key.substring(0, 16) + '...',
         });
         const key = await importAesKey(chatKey.key);
         const decAlgo = { name: 'AES-GCM', iv: fromBase64(payload.nonce) };
@@ -362,8 +373,14 @@
             decAlgo.additionalData = fromBase64(payload.aad);
         }
         const decrypted = await crypto.subtle.decrypt(decAlgo, key, fromBase64(payload.ciphertext));
-        debugLog('message.decrypt.success', { chatId, keyVersion: chatKey.keyVersion });
-        return textDecoder.decode(decrypted);
+        const decryptedText = textDecoder.decode(decrypted);
+        debugLog('message.decrypt.success', { 
+            chatId, 
+            keyVersion: chatKey.keyVersion,
+            decryptedLength: decryptedText.length,
+            decryptedPreview: decryptedText.substring(0, 20) + (decryptedText.length > 20 ? '...' : ''),
+        });
+        return decryptedText;
     }
 
     async function encryptFile(chatId, file) {
