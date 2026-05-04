@@ -1722,11 +1722,23 @@ function handleMemberAdded(data) {
 }
 
 function handleMemberLeft(data) {
+    // If current user was removed, don't try to rotate keys
+    if (data.user_id === currentUserId) {
+        // Current user was kicked/left - just refresh chat list
+        if (currentChatId === data.chat_id) {
+            navigateToChats();
+        }
+        return;
+    }
+    
     if (currentChatId === data.chat_id && !groupMembersPanel.classList.contains('hidden')) {
-        loadChatMembersPanel(data.chat_id);
+        loadChatMembersPanel(data.chat_id).catch(() => {
+            // If we can't load members, we were probably removed
+            hideElement(groupMembersPanel);
+        });
     }
     updateChatMembersCount(data.chat_id);
-    // Handle automatic key rotation
+    // Handle automatic key rotation (only if we're still in the chat)
     if (data.requires_key_rotation && e2eeEnabled && window.E2EE && authToken) {
         handleKeyRotation(data.chat_id);
     }
@@ -1739,7 +1751,10 @@ function updateChatMembersCount(chatId) {
             const infoEl = chatItem.querySelector('.chat-item-members-info');
             if (infoEl) infoEl.textContent = `${members.length} members`;
         }
-    }).catch(() => {});
+    }).catch(() => {
+        // Silently fail if we can't access members (e.g., we were removed)
+    });
+}
 }
 
 // Automatic key rotation handler
@@ -1783,6 +1798,11 @@ async function handleKeyRotation(chatId) {
             await loadMessages(chatId);
         }
     } catch (error) {
+        // Check if error is due to access denied (we were removed from chat)
+        if (error.message && error.message.includes('Failed to load members')) {
+            console.log(`[E2EE] Skipping key rotation for chat ${chatId} - no longer a member`);
+            return;
+        }
         console.warn(`[E2EE] Key rotation failed for chat ${chatId}:`, error);
     }
 }
