@@ -821,6 +821,9 @@ async def add_member_endpoint(
 
     current_user_id = user.id
     chat = await _verify_user_in_chat(db, chat_id, current_user_id)
+    
+    # Cache chat name before session operations
+    chat_name = chat.name
 
     if not chat.is_group:
         raise HTTPException(
@@ -877,7 +880,7 @@ async def add_member_endpoint(
     await manager.send_notification({
         "type": "added_to_group",
         "chat_id": chat_id,
-        "chat_name": chat.name,
+        "chat_name": chat_name,
         "added_by": current_user_id,
     }, member_data.user_id)
 
