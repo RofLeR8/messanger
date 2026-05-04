@@ -329,12 +329,6 @@ if (recoverResp.ok) {
     async function encryptText(chatId, content, extraAad = null) {
         const chatKey = loadChatKey(chatId);
         if (!chatKey) throw new Error('Missing chat key');
-        debugLog('message.encrypt.start', {
-            chatId,
-            keyVersion: chatKey.keyVersion,
-            contentLength: content?.length || 0,
-            keyPreview: chatKey.key.substring(0, 16) + '...',
-        });
         const key = await importAesKey(chatKey.key);
         const nonce = crypto.getRandomValues(new Uint8Array(12));
         const aadBytes = extraAad ? textEncoder.encode(JSON.stringify(extraAad)) : null;
@@ -343,7 +337,6 @@ if (recoverResp.ok) {
             algo.additionalData = aadBytes;
         }
         const encrypted = await crypto.subtle.encrypt(algo, key, textEncoder.encode(content));
-        debugLog('message.encrypt.success', { chatId, keyVersion: chatKey.keyVersion });
         return {
             ciphertext: toBase64(new Uint8Array(encrypted)),
             nonce: toBase64(nonce),
@@ -365,7 +358,6 @@ if (recoverResp.ok) {
             senderKeyId: payload?.sender_key_id || null,
             encryptionVersion: payload?.encryption_version || null,
             hasAad: Boolean(payload?.aad),
-            keyPreview: chatKey.key.substring(0, 16) + '...',
         });
         const key = await importAesKey(chatKey.key);
         const decAlgo = { name: 'AES-GCM', iv: fromBase64(payload.nonce) };
@@ -373,14 +365,8 @@ if (recoverResp.ok) {
             decAlgo.additionalData = fromBase64(payload.aad);
         }
         const decrypted = await crypto.subtle.decrypt(decAlgo, key, fromBase64(payload.ciphertext));
-        const decryptedText = textDecoder.decode(decrypted);
-        debugLog('message.decrypt.success', { 
-            chatId, 
-            keyVersion: chatKey.keyVersion,
-            decryptedLength: decryptedText.length,
-            decryptedPreview: decryptedText.substring(0, 20) + (decryptedText.length > 20 ? '...' : ''),
-        });
-        return decryptedText;
+        debugLog('message.decrypt.success', { chatId, keyVersion: chatKey.keyVersion });
+        return textDecoder.decode(decrypted);
     }
 
     async function encryptFile(chatId, file) {
