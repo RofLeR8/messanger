@@ -894,6 +894,9 @@ async def remove_member_endpoint(
     """Remove a member from a group chat (or leave if removing self)."""
     current_user_id = user.id
     chat = await _verify_user_in_chat(db, chat_id, current_user_id)
+    
+    # Cache chat name before session operations
+    chat_name = chat.name
 
     if not chat.is_group:
         raise HTTPException(
@@ -959,7 +962,7 @@ async def remove_member_endpoint(
         await manager.send_notification({
             "type": "removed_from_group",
             "chat_id": chat_id,
-            "chat_name": chat.name,
+            "chat_name": chat_name,
             "removed_by": current_user_id,
         }, user_id)
 
