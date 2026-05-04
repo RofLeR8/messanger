@@ -55,4 +55,12 @@ htmlcov/
 # Database migration backups
 src/migration/versions/*.bak
 src/migration/versions/*_backup*
-```
+
+## AI
+ai.md
+
+## Test
+test.db
+test.db-journal
+*.db
+*.db-journal

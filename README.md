@@ -94,6 +94,55 @@ uvicorn src.app.main:app --reload
 - **Real-time общение** — WebSocket соединения для мгновенной доставки сообщений
 - **Модульная структура** — разделение на независимые модули (users, chat, uploads, notifications)
 
+## Тестирование
+
+### Требования для тестирования
+
+```bash
+poetry install --with dev
+```
+
+### Запуск тестов
+
+```bash
+# Все тесты
+poetry run pytest
+
+# С покрытием кода
+poetry run pytest --cov=src/app --cov-report=term-missing
+
+# Конкретный файл
+poetry run pytest tests/test_auth.py -v
+```
+
+### Структура тестов
+
+```
+tests/
+├── conftest.py          # Фикстуры и настройка БД
+├── test_auth.py         # Тесты аутентификации и JWT
+├── test_crud.py         # Тесты операций CRUD
+├── test_api.py          # Тесты API endpoints
+└── test_websocket.py    # Тесты WebSocket менеджера
+```
+
+### Тестовая БД
+
+Тесты используют SQLite in-memory базу данных для изоляции. При необходимости создать файл тестовой БД:
+
+```python
+TEST_DATABASE_URL = "sqlite+aiosqlite:///test.db"
+```
+
+Тестовые БД автоматически исключены из git (.gitignore).
+
+### Текущее покрытие
+
+- Users модуль: ~65%
+- Chat модуль: ~40%
+- WebSocket: ~76%
+- Config/Utils: ~70%
+
 ## Лицензия
 
 Проект разработан в рамках учебного/личного проекта.
