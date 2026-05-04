@@ -3316,12 +3316,12 @@ closeAddMemberModalBtn.addEventListener('click', () => {
 
 async function loadAddMemberFriendsList() {
     try {
-        const friends = await getFriends();
+        const friends = await getMyFriends();
         const currentMembers = await getChatMembers(currentChatId);
         const currentMemberIds = new Set(currentMembers.map(m => m.user_id));
         
         // Filter out users already in the chat
-        const availableFriends = friends.filter(f => !currentMemberIds.has(f.id));
+        const availableFriends = friends.filter(f => !currentMemberIds.has(f.user_id));
         
         if (availableFriends.length === 0) {
             addMemberFriendsList.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">No friends available to add</p>';
@@ -3329,13 +3329,13 @@ async function loadAddMemberFriendsList() {
         }
         
         addMemberFriendsList.innerHTML = availableFriends.map(friend => `
-            <div class="friend-item" data-user-id="${friend.id}">
+            <div class="friend-item" data-user-id="${friend.user_id}">
                 <div class="friend-avatar">${getInitials(friend.name || friend.email)}</div>
                 <div class="friend-info">
                     <div class="friend-name">${friend.name || friend.email}</div>
-                    <div class="friend-email">${friend.email}</div>
+                    <div class="friend-email">${friend.email || friend.username || ''}</div>
                 </div>
-                <button class="btn btn-primary btn-sm add-friend-to-chat-btn" data-user-id="${friend.id}">Add</button>
+                <button class="btn btn-primary btn-sm add-friend-to-chat-btn" data-user-id="${friend.user_id}">Add</button>
             </div>
         `).join('');
         
@@ -3357,6 +3357,7 @@ async function loadAddMemberFriendsList() {
             });
         });
     } catch (error) {
+        console.error('Error loading friends for add member:', error);
         addMemberFriendsList.innerHTML = '<p style="color: var(--error); text-align: center; padding: 20px;">Failed to load friends</p>';
     }
 }
