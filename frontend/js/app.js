@@ -155,7 +155,6 @@ const groupPhotoUploadInput = document.getElementById('group-photo-upload-input'
 const groupMembersPanel = document.getElementById('group-members-panel');
 const groupMembersList = document.getElementById('group-members-list');
 const closeMembersPanelBtn = document.getElementById('close-members-panel-btn');
-const addMemberEmailInput = document.getElementById('add-member-email');
 const addMemberBtn = document.getElementById('add-member-btn');
 const leaveGroupBtn = document.getElementById('leave-group-btn');
 const groupEditSection = document.getElementById('group-edit-section');
@@ -165,6 +164,11 @@ const groupEditPhotoPreview = document.getElementById('group-edit-photo-preview'
 const groupEditPhotoUploadInput = document.getElementById('group-edit-photo-upload-input');
 const saveGroupNameBtn = document.getElementById('save-group-name-btn');
 const leaveGroupSection = document.getElementById('leave-group-section');
+
+// Add Member Modal
+const addMemberModal = document.getElementById('add-member-modal');
+const closeAddMemberModalBtn = document.getElementById('close-add-member-modal-btn');
+const addMemberFriendsList = document.getElementById('add-member-friends-list');
 
 // Utility Functions
 function showElement(element) { element.classList.remove('hidden'); }
@@ -3282,17 +3286,61 @@ chatTitle.style.cursor = 'pointer';
 closeMembersPanelBtn.addEventListener('click', () => { hideElement(groupMembersPanel); });
 
 addMemberBtn.addEventListener('click', async () => {
-    const email = addMemberEmailInput.value.trim();
-    if (!email) { alert('Please enter an email'); return; }
-    try {
-        const users = await getUsers();
-        const user = users.find(u => u.email === email);
-        if (!user) throw new Error('User not found');
-        await addChatMember(currentChatId, user.id);
-        addMemberEmailInput.value = '';
-        loadChatMembersPanel(currentChatId);
-    } catch (error) { alert('Failed to add member: ' + error.message); }
+    // Show modal with friends list
+    showElement(addMemberModal);
+    await loadAddMemberFriendsList();
 });
+
+closeAddMemberModalBtn.addEventListener('click', () => {
+    hideElement(addMemberModal);
+});
+
+async function loadAddMemberFriendsList() {
+    try {
+        const friends = await getFriends();
+        const currentMembers = await getChatMembers(currentChatId);
+        const currentMemberIds = new Set(currentMembers.map(m => m.user_id));
+        
+        // Filter out users already in the chat
+        const availableFriends = friends.filter(f => !currentMemberIds.has(f.id));
+        
+        if (availableFriends.length === 0) {
+            addMemberFriendsList.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">No friends available to add</p>';
+            return;
+        }
+        
+        addMemberFriendsList.innerHTML = availableFriends.map(friend => `
+            <div class="friend-item" data-user-id="${friend.id}">
+                <div class="friend-avatar">${getInitials(friend.name || friend.email)}</div>
+                <div class="friend-info">
+                    <div class="friend-name">${friend.name || friend.email}</div>
+                    <div class="friend-email">${friend.email}</div>
+                </div>
+                <button class="btn btn-primary btn-sm add-friend-to-chat-btn" data-user-id="${friend.id}">Add</button>
+            </div>
+        `).join('');
+        
+        // Add click handlers
+        document.querySelectorAll('.add-friend-to-chat-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const userId = parseInt(e.target.dataset.userId);
+                try {
+                    btn.disabled = true;
+                    btn.textContent = 'Adding...';
+                    await addChatMember(currentChatId, userId);
+                    hideElement(addMemberModal);
+                    loadChatMembersPanel(currentChatId);
+                } catch (error) {
+                    alert('Failed to add member: ' + error.message);
+                    btn.disabled = false;
+                    btn.textContent = 'Add';
+                }
+            });
+        });
+    } catch (error) {
+        addMemberFriendsList.innerHTML = '<p style="color: var(--error); text-align: center; padding: 20px;">Failed to load friends</p>';
+    }
+}
 
 leaveGroupBtn.addEventListener('click', async () => {
     if (!confirm('Are you sure you want to leave this group?')) return;
