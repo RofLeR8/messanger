@@ -243,6 +243,30 @@
         }
 
         if (mine.status === 404) {
+            // Try backup/recovery key first (for new devices or after key rotation)
+            debugLog('chat_key.ensure.no_device_key_trying_recover', { chatId, myKeyId: pair.keyId });
+            try {
+                const recoverResp = await fetch(`/chats/${chatId}/keys/me/recover`, {
+                    headers: { Authorization: `Bearer ${authToken}` },
+                });
+                if (recoverResp.ok) {
+                    const recovered = await recoverResp.json();
+                    const recoveredBase64 = recovered.chat_key_plaintext;
+                    const keyVersion = recovered.key_version || 1;
+                    saveChatKey(chatId, keyVersion, recoveredBase64);
+                    chatKeyCache.set(chatId, { keyVersion, key: recoveredBase64 });
+                    // Re-wrap for current device
+                    try {
+                        await shareChatKeyToUser(chatId, currentUserId, authToken, recoveredBase64, keyVersion, true);
+                    } catch (_) {}
+                    debugLog('chat_key.ensure.recover_success_from_backup', { chatId, keyVersion, myKeyId: pair.keyId });
+                    return { keyVersion, key: recoveredBase64 };
+                }
+            } catch (e) {
+                debugLog('chat_key.ensure.recover_failed', { chatId, myKeyId: pair.keyId, error: String(e) });
+            }
+
+            // Check if chat has any keys at all
             let hasAnyKeys = false;
             try {
                 const metaResp = await fetch(`/chats/${chatId}/keys/meta`, { headers: { Authorization: `Bearer ${authToken}` } });
@@ -253,30 +277,20 @@
             } catch (_) {}
 
             if (hasAnyKeys) {
-                debugLog('chat_key.ensure.no_device_key_but_chat_has_keys_trying_recover', { chatId, myKeyId: pair.keyId });
+                // Chat has keys but we can't access them - request help from other devices/users
+                debugLog('chat_key.ensure.requesting_recovery', { chatId, myKeyId: pair.keyId });
                 try {
-                    const recoverResp = await fetch(`/chats/${chatId}/keys/me/recover`, {
+                    await fetch(`/chats/${chatId}/keys/recovery-request`, {
+                        method: 'POST',
                         headers: { Authorization: `Bearer ${authToken}` },
                     });
-if (recoverResp.ok) {
-                        const recovered = await recoverResp.json();
-                        const recoveredBase64 = recovered.chat_key_plaintext;
-                        const keyVersion = recovered.key_version || 1;
-                        saveChatKey(chatId, keyVersion, recoveredBase64);
-                        chatKeyCache.set(chatId, { keyVersion, key: recoveredBase64 });
-                        try {
-                            await shareChatKeyToUser(chatId, currentUserId, authToken, recoveredBase64, keyVersion, true);
-                        } catch (_) {}
-                        debugLog('chat_key.ensure.recover_success', { chatId, keyVersion, myKeyId: pair.keyId });
-                        return { keyVersion, key: recoveredBase64 };
-                    }
-                } catch (e) {
-                    debugLog('chat_key.ensure.recover_failed_fallback_bootstrap', { chatId, myKeyId: pair.keyId, error: String(e) });
-                }
+                } catch (_) {}
+                
                 const wrapped = new Error('CHAT_KEY_MISMATCH');
                 throw wrapped;
             }
 
+            // No keys exist - bootstrap new ones
             debugLog('chat_key.ensure.no_key_for_device_bootstrap', { chatId, myKeyId: pair.keyId });
             return bootstrapChatKeyForMembers(chatId, members, currentUserId, authToken);
         }
@@ -396,6 +410,12 @@ if (recoverResp.ok) {
         return plain;
     }
 
+    function clearChatKey(chatId) {
+        removeChatKey(chatId);
+        chatKeyCache.delete(chatId);
+        debugLog('chat_key.cleared', { chatId });
+    }
+
     global.E2EE = {
         getOrCreateDeviceKeyPair,
         uploadMyPublicKey,
@@ -408,5 +428,6 @@ if (recoverResp.ok) {
         decryptFile,
         loadChatKey,
         loadChatKeyByVersion,
+        clearChatKey,
     };
 })(window);

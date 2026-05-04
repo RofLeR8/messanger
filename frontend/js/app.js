@@ -1711,6 +1711,10 @@ function handleMemberAdded(data) {
     if (data.user_id && data.user_name) {
         usersCache[data.user_id] = { name: data.user_name, email: '', is_online: false };
     }
+    // Handle automatic key rotation
+    if (data.requires_key_rotation && e2eeEnabled && window.E2EE && authToken) {
+        handleKeyRotation(data.chat_id);
+    }
 }
 
 function handleMemberLeft(data) {
@@ -1718,6 +1722,10 @@ function handleMemberLeft(data) {
         loadChatMembersPanel(data.chat_id);
     }
     updateChatMembersCount(data.chat_id);
+    // Handle automatic key rotation
+    if (data.requires_key_rotation && e2eeEnabled && window.E2EE && authToken) {
+        handleKeyRotation(data.chat_id);
+    }
 }
 
 function updateChatMembersCount(chatId) {
@@ -1728,6 +1736,51 @@ function updateChatMembersCount(chatId) {
             if (infoEl) infoEl.textContent = `${members.length} members`;
         }
     }).catch(() => {});
+}
+
+// Automatic key rotation handler
+async function handleKeyRotation(chatId) {
+    try {
+        // Small delay to ensure backend has processed member changes
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        const members = await getChatMembers(chatId);
+        if (!members || members.length === 0) return;
+        
+        // Check if we already have a valid key
+        const existingKey = window.E2EE.loadChatKey(chatId);
+        if (existingKey) {
+            // We have a key - share it with all members (helps new devices)
+            console.log(`[E2EE] Sharing existing key for chat ${chatId} to all members`);
+            for (const member of members) {
+                const uid = member.user_id || member.id;
+                if (uid !== currentUserId) {
+                    try {
+                        await window.E2EE.shareChatKeyToUser(chatId, uid, authToken);
+                    } catch (e) {
+                        console.warn(`[E2EE] Failed to share key to user ${uid}:`, e);
+                    }
+                }
+            }
+            return;
+        }
+        
+        // Clear local cache for this chat
+        if (window.E2EE && window.E2EE.clearChatKey) {
+            window.E2EE.clearChatKey(chatId);
+        }
+        
+        // Re-bootstrap keys for all members
+        console.log(`[E2EE] Auto key rotation for chat ${chatId}`);
+        await window.E2EE.ensureChatKey(chatId, members, currentUserId, authToken);
+        
+        // Refresh chat if currently viewing it
+        if (currentChatId === chatId) {
+            await loadMessages(chatId);
+        }
+    } catch (error) {
+        console.warn(`[E2EE] Key rotation failed for chat ${chatId}:`, error);
+    }
 }
 
 function connectNotificationWebSocket() {
@@ -1789,8 +1842,15 @@ function connectNotificationWebSocket() {
 
             case 'key_recovery_requested':
                 if (data.chat_id) refreshChats();
-                if (window.E2EE && authToken && data.chat_id && data.requested_by && data.requested_by !== currentUserId) {
-                    window.E2EE.shareChatKeyToUser(data.chat_id, data.requested_by, authToken).catch(() => {});
+                if (window.E2EE && authToken && data.chat_id && data.requested_by) {
+                    // Help other users recover their keys
+                    if (data.requested_by !== currentUserId) {
+                        window.E2EE.shareChatKeyToUser(data.chat_id, data.requested_by, authToken).catch(() => {});
+                    }
+                    // Also trigger automatic re-bootstrap if we don't have keys either
+                    setTimeout(() => {
+                        handleKeyRotation(data.chat_id);
+                    }, 1000);
                 }
                 break;
         }
