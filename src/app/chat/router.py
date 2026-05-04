@@ -850,6 +850,9 @@ async def add_member_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User does not exist"
         )
+    
+    # Cache user name before session operations
+    new_member_name = new_member.name
 
     # Add member
     result = await add_member_to_chat(db, chat_id, member_data.user_id)
@@ -865,7 +868,7 @@ async def add_member_endpoint(
         "type": "member_added",
         "chat_id": chat_id,
         "user_id": member_data.user_id,
-        "user_name": new_member.name,
+        "user_name": new_member_name,
         "added_by": current_user_id,
         "requires_key_rotation": True,
     }, chat_id)
