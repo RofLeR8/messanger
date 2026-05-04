@@ -323,10 +323,13 @@ async def get_messages_from_chat(db: AsyncSession, chat_id: int, limit: int = 50
         if msg.in_reply_to_id:
             reply_to_msg = await get_message_by_id(db, msg.in_reply_to_id)
             if reply_to_msg:
-                msg_dict['reply_to_content'] = reply_to_msg.content
+                # Use content or placeholder for encrypted messages
+                reply_content = reply_to_msg.content or "[Encrypted message]"
+                msg_dict['reply_to_content'] = reply_content
                 # Get sender name
                 reply_to_user = await get_one_by_id_or_none(db, reply_to_msg.sender_id)
                 msg_dict['reply_to_sender_name'] = reply_to_user.name if reply_to_user else None
+                msg_dict['reply_to_user_id'] = reply_to_msg.sender_id
 
         messages_data.append(msg_dict)
 
@@ -353,10 +356,12 @@ async def get_message_with_reply_info(db: AsyncSession, message_id: int) -> Opti
     if message.in_reply_to_id:
         reply_to_msg = await get_message_by_id(db, message.in_reply_to_id)
         if reply_to_msg:
+            # Use content or placeholder for encrypted messages
+            reply_content = reply_to_msg.content or "[Encrypted message]"
             reply_to_info = {
                 'id': reply_to_msg.id,
                 'sender_id': reply_to_msg.sender_id,
-                'content': reply_to_msg.content[:100] + '...' if len(reply_to_msg.content) > 100 else reply_to_msg.content
+                'content': reply_content[:100] + '...' if len(reply_content) > 100 else reply_content
             }
 
     return {
@@ -550,8 +555,8 @@ async def edit_message_encrypted(
 ) -> Optional[Message]:
     message = await get_message_by_id(db, message_id)
     if message and message.sender_id == user_id:
-        message.edit_content = message.content
-        message.content = None
+        message.edit_content = message.content or ""
+        message.content = ""  # Empty string instead of None for NOT NULL constraint
         message.ciphertext = ciphertext
         message.nonce = nonce
         message.aad = aad

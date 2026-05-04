@@ -484,14 +484,27 @@ async def create_message_in_chat(
 
     # Get reply-to info for broadcast
     reply_to_info = None
+    reply_to_sender_name = None
+    
+    reply_to_content_client = message_data.reply_to_content
+    reply_to_user_id_client = message_data.reply_to_user_id
+    
     if message_data.in_reply_to_id:
-        reply_msg_info = await get_message_with_reply_info(db, message_data.in_reply_to_id)
-        if reply_msg_info and reply_msg_info['reply_to']:
+        # Prefer client-provided content (already decrypted), fall back to DB lookup
+        if reply_to_content_client:
             reply_to_info = {
-                'id': reply_msg_info['reply_to']['id'],
-                'sender_id': reply_msg_info['reply_to']['sender_id'],
-                'content': reply_msg_info['reply_to']['content']
+                'id': message_data.in_reply_to_id,
+                'sender_id': reply_to_user_id_client or current_user_id,
+                'content': reply_to_content_client[:100] + '...' if len(reply_to_content_client) > 100 else reply_to_content_client
             }
+        else:
+            reply_msg_info = await get_message_with_reply_info(db, message_data.in_reply_to_id)
+            if reply_msg_info and reply_msg_info['reply_to']:
+                reply_to_info = {
+                    'id': reply_msg_info['reply_to']['id'],
+                    'sender_id': reply_msg_info['reply_to']['sender_id'],
+                    'content': reply_msg_info['reply_to']['content']
+                }
 
     # Get sender name for reply_to
     reply_to_sender_name = None
@@ -1100,16 +1113,29 @@ async def websocket_chat_connection(
                 # Get reply-to info for broadcast
                 reply_to_info = None
                 reply_to_sender_name = None
+                
+                reply_to_content_client = data.get("reply_to_content")
+                reply_to_user_id_client = data.get("reply_to_user_id")
 
                 if in_reply_to_id:
-                    reply_to_msg = await get_message_by_id(db, in_reply_to_id)
-                    if reply_to_msg:
+                    # Prefer client-provided content (already decrypted), fall back to DB lookup
+                    if reply_to_content_client:
                         reply_to_info = {
-                            'id': reply_to_msg.id,
-                            'sender_id': reply_to_msg.sender_id,
-                            'content': reply_to_msg.content[:100] + '...' if len(reply_to_msg.content) > 100 else reply_to_msg.content
+                            'id': in_reply_to_id,
+                            'sender_id': reply_to_user_id_client or current_user_id,
+                            'content': reply_to_content_client[:100] + '...' if len(reply_to_content_client) > 100 else reply_to_content_client
                         }
-                        reply_to_user = await get_one_by_id_or_none(db, reply_to_msg.sender_id)
+                    else:
+                        reply_to_msg = await get_message_by_id(db, in_reply_to_id)
+                        if reply_to_msg:
+                            reply_content = reply_to_msg.content or "[Encrypted message]"
+                            reply_to_info = {
+                                'id': reply_to_msg.id,
+                                'sender_id': reply_to_msg.sender_id,
+                                'content': reply_content[:100] + '...' if len(reply_content) > 100 else reply_content
+                            }
+                    if reply_to_user_id_client:
+                        reply_to_user = await get_one_by_id_or_none(db, reply_to_user_id_client)
                         reply_to_sender_name = reply_to_user.name if reply_to_user else None
 
                 # Broadcast to all connected clients in the chat
@@ -1151,19 +1177,21 @@ async def websocket_chat_connection(
                     await manager.send_notification(broadcast_data, member_id)
 
     except WebSocketDisconnect:
+        has_other_connections = bool(manager.active_connections.get(current_user_id))
         manager.disconnect(websocket, current_user_id, chat_id)
-        # Only set offline if no other connections (chat or notification)
-        if not manager.active_connections.get(current_user_id) and current_user_id not in manager.notification_connections:
+        if not has_other_connections and current_user_id not in manager.notification_connections:
             await set_user_online(db, current_user_id, False)
             await manager.broadcast_user_status(current_user_id, False)
     except asyncio.CancelledError:
+        has_other_connections = bool(manager.active_connections.get(current_user_id))
         manager.disconnect(websocket, current_user_id, chat_id)
-        if not manager.active_connections.get(current_user_id) and current_user_id not in manager.notification_connections:
+        if not has_other_connections and current_user_id not in manager.notification_connections:
             await set_user_online(db, current_user_id, False)
             await manager.broadcast_user_status(current_user_id, False)
         raise
     except Exception:
+        has_other_connections = bool(manager.active_connections.get(current_user_id))
         manager.disconnect(websocket, current_user_id, chat_id)
-        if not manager.active_connections.get(current_user_id) and current_user_id not in manager.notification_connections:
+        if not has_other_connections and current_user_id not in manager.notification_connections:
             await set_user_online(db, current_user_id, False)
             await manager.broadcast_user_status(current_user_id, False)

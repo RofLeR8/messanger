@@ -49,6 +49,8 @@ class SMessageCreate(BaseModel):
     file_name: Optional[str] = Field(None, description="File name")
     in_reply_to_id: Optional[int] = Field(None, description="ID of message to reply to")
     encrypted_payload: Optional[SEncryptedPayload] = Field(None, description="Encrypted message payload")
+    reply_to_content: Optional[str] = Field(None, description="Pre-decrypted content for reply display")
+    reply_to_user_id: Optional[int] = Field(None, description="User ID of reply sender")
 
 
 class SMessageUpdate(BaseModel):

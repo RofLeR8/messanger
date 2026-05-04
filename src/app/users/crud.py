@@ -109,7 +109,7 @@ async def set_user_online(db: AsyncSession, user_id: int, is_online: bool) -> Op
     if user:
         user.is_online = is_online
         if not is_online:
-            user.last_seen = datetime.now()  # Use naive datetime for PostgreSQL
+            user.last_seen = datetime.utcnow()  # Use UTC time
         await db.commit()
         await db.refresh(user)
     return user
@@ -118,7 +118,7 @@ async def update_user_last_seen(db: AsyncSession, user_id: int) -> Optional[User
     """Update user's last seen timestamp."""
     user = await get_one_by_id_or_none(db, user_id)
     if user:
-        user.last_seen = datetime.now()  # Use naive datetime for PostgreSQL
+        user.last_seen = datetime.utcnow()  # Use UTC time
         await db.commit()
         await db.refresh(user)
     return user
@@ -128,6 +128,16 @@ async def get_users_online_status(db: AsyncSession, user_ids: List[int]) -> dict
     q = select(User.id, User.is_online).where(User.id.in_(user_ids))
     result = await db.execute(q)
     return {row.id: row.is_online for row in result.all()}
+
+
+async def get_all_online_users(db: AsyncSession) -> List[dict]:
+    """Get all users with is_online=True."""
+    q = select(User.id, User.last_seen).where(User.is_online == True)
+    result = await db.execute(q)
+    return [
+        {"user_id": row.id, "last_seen": row.last_seen.isoformat() if row.last_seen else None}
+        for row in result.all()
+    ]
 
 
 async def upsert_user_public_key(

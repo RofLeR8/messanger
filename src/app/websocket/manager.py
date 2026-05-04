@@ -32,9 +32,11 @@ class ConnectionManager:
         self.chat_users[chat_id].discard(user_id)
         self.user_chats[user_id].discard(chat_id)
 
-        # If user has no more connections, mark as offline
+        # If user has no more connections at all, mark as offline
+        # But keep them online if they have notification connection
         if not self.active_connections[user_id]:
-            self.online_users.discard(user_id)
+            if user_id not in self.notification_connections:
+                self.online_users.discard(user_id)
             del self.active_connections[user_id]
 
     async def connect_notification(self, websocket: WebSocket, user_id: int):
@@ -114,17 +116,17 @@ class ConnectionManager:
                     pass
 
     async def broadcast_user_status(self, user_id: int, is_online: bool):
-        """Broadcast user's online status to all users who have chats with this user."""
-        # This would require knowing which users have chats with this user
-        # For now, we'll broadcast to all connected clients
+        """Broadcast user's online status to all connected users except the user themselves."""
         status_message = {
             "type": "user_status",
             "user_id": user_id,
             "is_online": is_online
         }
 
-        # Send to all connections (could be optimized)
-        for connections in self.active_connections.values():
+        # Send to all active chat connections
+        for uid, connections in self.active_connections.items():
+            if uid == user_id:
+                continue
             for connection in connections:
                 try:
                     await connection.send_json(status_message)

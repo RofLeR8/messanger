@@ -1,11 +1,14 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.websocket.manager import manager
-from app.users.crud import set_user_online, get_one_by_id_or_none, get_user_session_by_token
+from app.users.crud import set_user_online, get_one_by_id_or_none, get_user_session_by_token, get_all_online_users
 from app.database import async_session_maker
 from jose import jwt
 from datetime import datetime, timezone
 from app.config import get_auth_data
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
 
@@ -47,14 +50,14 @@ async def notifications_websocket(
             await websocket.close(code=4001, reason="Invalid token payload")
             return
 
-        db = async_session_maker()
+        db_temp = async_session_maker()
         try:
-            user_session = await get_user_session_by_token(db, session_token)
+            user_session = await get_user_session_by_token(db_temp, session_token)
             if not user_session or user_session.user_id != current_user_id:
                 await websocket.close(code=4001, reason="Invalid session")
                 return
         finally:
-            await db.close()
+            await db_temp.close()
 
     except Exception:
         await websocket.close(code=4001, reason="Authentication failed")
@@ -73,9 +76,30 @@ async def notifications_websocket(
     # Connect to notifications
     await manager.connect_notification(websocket, current_user_id)
 
+    # Broadcast online status to all other connected users
+    try:
+        await manager.broadcast_user_status(current_user_id, True)
+    except Exception:
+        pass
+
+    # Send list of all online users to the newly connected client
+    try:
+        online_users = await get_all_online_users(db)
+        await websocket.send_json({
+            "type": "online_users",
+            "users": online_users
+        })
+    except Exception:
+        pass
+
     try:
         while True:
-            await asyncio.sleep(60)
+            # Use receive_text to detect disconnect
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
+            except asyncio.TimeoutError:
+                # Timeout is normal, just continue
+                continue
     except WebSocketDisconnect:
         pass
     except asyncio.CancelledError:
@@ -83,18 +107,27 @@ async def notifications_websocket(
     except Exception:
         pass
     finally:
-        # Set user offline only if they have no other active chat connections
-        try:
-            if not manager.active_connections.get(current_user_id):
+        # Check if user has any other connections before going offline
+        has_chat_connections = bool(manager.active_connections.get(current_user_id))
+        
+        logger.info(f"User {current_user_id} disconnecting from notifications. Has chat connections: {has_chat_connections}")
+        
+        # Disconnect from notifications
+        manager.disconnect_notification(current_user_id)
+        
+        # Set user offline only if they have no chat connections
+        if not has_chat_connections:
+            try:
                 await set_user_online(db, current_user_id, False)
                 await db.commit()
-        except Exception:
-            pass
-        try:
-            await manager.broadcast_user_status(current_user_id, False)
-        except Exception:
-            pass
-        manager.disconnect_notification(current_user_id)
+                logger.info(f"User {current_user_id} set to offline in DB")
+            except Exception as e:
+                logger.error(f"Error setting user {current_user_id} offline: {e}")
+            try:
+                await manager.broadcast_user_status(current_user_id, False)
+                logger.info(f"Broadcasted offline status for user {current_user_id}")
+            except Exception as e:
+                logger.error(f"Error broadcasting offline status for user {current_user_id}: {e}")
         try:
             await db.close()
         except Exception:

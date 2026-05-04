@@ -190,7 +190,8 @@ function formatTime(dateString) {
 
 function formatLastSeen(dateString) {
     if (!dateString) return '';
-    const date = new Date(dateString);
+    // Parse as UTC and convert to local time
+    const date = new Date(dateString + (dateString.endsWith('Z') ? '' : 'Z'));
     const now = new Date();
     const diffMs = now - date;
     const diffMins = Math.floor(diffMs / 60000);
@@ -747,15 +748,23 @@ async function navigateToChat(chatId, chatName, isGroup) {
                 if (chatHeaderAvatar) chatHeaderAvatar.dataset.userId = String(otherMember.user_id);
                 chatTitle.classList.add('user-clickable');
                 chatTitle.dataset.userId = String(otherMember.user_id);
-                // Cache the user info with avatar
-                usersCache[otherMember.user_id] = {
-                    name: otherMember.user_name || otherMember.user_email?.split('@')[0],
-                    email: otherMember.user_email || '',
-                    username: otherMember.user_username || null,
-                    avatar_url: otherMember.user_avatar_url || null,
-                    is_online: false,
-                    last_seen: null
-                };
+                // Cache the user info with avatar (don't overwrite existing status)
+                if (!usersCache[otherMember.user_id]) {
+                    usersCache[otherMember.user_id] = {
+                        name: otherMember.user_name || otherMember.user_email?.split('@')[0],
+                        email: otherMember.user_email || '',
+                        username: otherMember.user_username || null,
+                        avatar_url: otherMember.user_avatar_url || null,
+                        is_online: false,
+                        last_seen: null
+                    };
+                } else {
+                    // Update only name/avatar if user already exists
+                    usersCache[otherMember.user_id].name = otherMember.user_name || otherMember.user_email?.split('@')[0];
+                    usersCache[otherMember.user_id].email = otherMember.user_email || '';
+                    usersCache[otherMember.user_id].username = otherMember.user_username || null;
+                    usersCache[otherMember.user_id].avatar_url = otherMember.user_avatar_url || null;
+                }
                 // Update status
                 updateUserOnlineStatus(otherMember.user_id);
             }
@@ -1245,13 +1254,18 @@ async function logout() {
         localStorage.removeItem('accountKeyNonce');
         localStorage.removeItem('accountKeySalt');
         if (websocket) { websocket.close(); websocket = null; }
-        if (notificationWs) { notificationWs.close(); notificationWs = null; }
+        if (notificationWs) { 
+            notificationWs.close(); 
+            notificationWs = null; 
+        }
         // Reset caches
         usersCache = {};
         friendsCache = [];
         pendingRequestsCache = [];
         currentActiveTab = 'chats';
         currentFriendsTab = 'all';
+        // Wait a bit for WS to close gracefully
+        await new Promise(resolve => setTimeout(resolve, 100));
     }
 }
 
@@ -1747,6 +1761,21 @@ function connectNotificationWebSocket() {
                 updateUserOnlineStatusInCache(data.user_id, data.is_online);
                 break;
 
+            case 'online_users':
+                data.users.forEach(u => {
+                    if (!usersCache[u.user_id]) {
+                        usersCache[u.user_id] = {
+                            user_id: u.user_id,
+                            is_online: false,
+                            last_seen: null
+                        };
+                    }
+                    usersCache[u.user_id].is_online = true;
+                    usersCache[u.user_id].last_seen = u.last_seen;
+                });
+                updateAllChatStatuses();
+                break;
+
             case 'added_to_group':
                 refreshChats();
                 break;
@@ -1967,6 +1996,27 @@ async function loadMessages(chatId) {
         const fragment = document.createDocumentFragment();
         for (const msg of messages) {
             msg.display_content = await decryptMessageContentIfNeeded(msg);
+            
+            // Decrypt reply_to_content if it's encrypted
+            if (msg.in_reply_to_id && msg.reply_to_content === '[Encrypted message]') {
+                // Try to find the original message in loaded messages
+                const replyToMsg = messages.find(m => m.id === msg.in_reply_to_id);
+                if (replyToMsg && replyToMsg.ciphertext && window.E2EE) {
+                    try {
+                        const decrypted = await window.E2EE.decryptPayload(chatId, {
+                            ciphertext: replyToMsg.ciphertext,
+                            nonce: replyToMsg.nonce,
+                            aad: replyToMsg.aad,
+                            encryption_version: replyToMsg.encryption_version,
+                            sender_key_id: replyToMsg.sender_key_id
+                        });
+                        msg.reply_to_content = decrypted || '[Encrypted message]';
+                    } catch {
+                        msg.reply_to_content = '[Encrypted message]';
+                    }
+                }
+            }
+            
             const isSent = msg.sender_id === currentUserId;
             const el = createMessageElement(msg, isSent);
             fragment.appendChild(el);
@@ -2025,7 +2075,7 @@ function createMessageElement(message, isSent) {
     }
 
     // Reply quote
-    if (message.in_reply_to_id && message.reply_to_content) {
+    if (message.in_reply_to_id && message.reply_to_content !== undefined) {
         const replyToName = message.reply_to_sender_name || getUserDisplayName(message.in_reply_to_user_id);
         const truncated = message.reply_to_content.length > 50 ? message.reply_to_content.substring(0, 50) + '...' : message.reply_to_content;
         html += `<div class="message-reply-quote" data-reply-to-id="${message.in_reply_to_id}">
@@ -2148,10 +2198,31 @@ function updateUserOnlineStatusInCache(userId, isOnline) {
         usersCache[userId].last_seen = isOnline ? null : new Date().toISOString();
     }
     updateChatItemOnlineStatus(userId, isOnline);
+    updateFriendItemOnlineStatus(userId, isOnline);
     // Update header status if viewing this user's direct chat
     if (currentChatId && !currentChatIsGroup && chatOtherUserId[currentChatId] == userId) {
         updateUserOnlineStatus(userId);
     }
+}
+
+function updateFriendItemOnlineStatus(userId, isOnline) {
+    // Find friend item in friends list
+    const friendItems = document.querySelectorAll('.friend-item');
+    friendItems.forEach(item => {
+        const nameEl = item.querySelector('.friend-name');
+        if (nameEl && nameEl.dataset.userId == userId) {
+            // Remove existing status dot
+            const existingDot = nameEl.querySelector('.status-dot');
+            if (existingDot) existingDot.remove();
+            
+            // Add online dot if user is online
+            if (isOnline) {
+                const dot = document.createElement('span');
+                dot.className = 'status-dot online';
+                nameEl.insertBefore(dot, nameEl.firstChild);
+            }
+        }
+    });
 }
 
 function updateChatItemOnlineStatus(userId, isOnline) {
@@ -2174,6 +2245,49 @@ function updateChatItemOnlineStatus(userId, isOnline) {
         const dot = document.createElement('span');
         dot.className = 'status-dot online';
         nameEl.insertBefore(dot, nameEl.firstChild);
+    }
+}
+
+function updateAllChatStatuses() {
+    document.querySelectorAll('.chat-item').forEach(chatEl => {
+        const chatId = chatEl.dataset.chatId;
+        const otherUserId = chatOtherUserId[chatId];
+        if (otherUserId && usersCache[otherUserId]) {
+            const isOnline = usersCache[otherUserId].is_online;
+            const nameEl = chatEl.querySelector('.chat-item-name');
+            if (nameEl) {
+                const existingDot = nameEl.querySelector('.status-dot');
+                if (existingDot) existingDot.remove();
+                if (isOnline) {
+                    const dot = document.createElement('span');
+                    dot.className = 'status-dot online';
+                    nameEl.insertBefore(dot, nameEl.firstChild);
+                }
+            }
+        }
+    });
+    
+    // Update friends list
+    document.querySelectorAll('.friend-item').forEach(friendEl => {
+        const nameEl = friendEl.querySelector('.friend-name');
+        if (nameEl && nameEl.dataset.userId) {
+            const userId = parseInt(nameEl.dataset.userId);
+            if (usersCache[userId]) {
+                const isOnline = usersCache[userId].is_online;
+                const existingDot = nameEl.querySelector('.status-dot');
+                if (existingDot) existingDot.remove();
+                if (isOnline) {
+                    const dot = document.createElement('span');
+                    dot.className = 'status-dot online';
+                    nameEl.insertBefore(dot, nameEl.firstChild);
+                }
+            }
+        }
+    });
+    
+    // Update header status if viewing a direct chat
+    if (currentChatId && !currentChatIsGroup && chatOtherUserId[currentChatId]) {
+        updateUserOnlineStatus(chatOtherUserId[currentChatId]);
     }
 }
 
@@ -2260,15 +2374,17 @@ async function loadChats() {
                         const chatName = otherMember.user_name || otherMember.user_email?.split('@')[0] || `User ${otherMember.user_id}`;
                         chatNamesCache[chat.id] = chatName;
                         chatOtherUserId[chat.id] = otherMember.user_id;
-                        // Cache user info for online status
-                        usersCache[otherMember.user_id] = {
-                            name: otherMember.user_name || chatName,
-                            email: otherMember.user_email || '',
-                            username: otherMember.user_username || null,
-                            avatar_url: otherMember.user_avatar_url || null,
-                            is_online: false,
-                            last_seen: null
-                        };
+                        // Cache user info for online status (don't overwrite if already exists)
+                        if (!usersCache[otherMember.user_id]) {
+                            usersCache[otherMember.user_id] = {
+                                name: otherMember.user_name || chatName,
+                                email: otherMember.user_email || '',
+                                username: otherMember.user_username || null,
+                                avatar_url: otherMember.user_avatar_url || null,
+                                is_online: false,
+                                last_seen: null
+                            };
+                        }
                     }
                 } catch(e) { /* ignore individual chat member errors */ }
             } else {
@@ -2279,6 +2395,8 @@ async function loadChats() {
 
         await decorateChatListPreviews(chats);
         renderChats(chats, true);
+        // Update online statuses after rendering
+        updateAllChatStatuses();
     } catch (error) {
         console.error('Error loading chats:', error);
         if (!authToken || /401|unauthorized|not authenticated/i.test(String(error?.message || ''))) {
@@ -2308,6 +2426,14 @@ async function loadUsers() {
 // ==================== Context Menu ====================
 function showContextMenu(e, message) {
     e.preventDefault();
+    
+    // Get fresh isPinned status from DOM element (in case it was pinned/unpinned)
+    const msgEl = document.querySelector(`.message[data-message-id="${message.id}"]`);
+    const isPinned = msgEl?.dataset.isPinned === 'true';
+    
+    // Update message object with fresh status
+    message.is_pinned = isPinned;
+    
     contextMenuTarget = message;
     contextMessageId = message.id;
     contextChatId = currentChatId;
@@ -2322,7 +2448,7 @@ function showContextMenu(e, message) {
     contextMenu.style.display = 'flex';
 
     const pinBtn = contextMenu.querySelector('[data-action="pin"] .pin-text');
-    if (pinBtn) pinBtn.textContent = message.is_pinned ? 'Unpin' : 'Pin';
+    if (pinBtn) pinBtn.textContent = isPinned ? 'Unpin' : 'Pin';
 
     const editBtn = contextMenu.querySelector('[data-action="edit"]');
     const deleteBtn = contextMenu.querySelector('[data-action="delete"]');
@@ -2377,7 +2503,12 @@ contextMenu.addEventListener('click', async (e) => {
 
 // ==================== Reply ====================
 function setReplyingTo(message) {
-    replyingToMessage = { id: message.id, sender_id: message.sender_id, content: message.content };
+    replyingToMessage = { 
+        id: message.id, 
+        sender_id: message.sender_id, 
+        content: message.content,
+        encrypted_payload: message.encrypted_payload 
+    };
     const senderName = getUserDisplayName(message.sender_id);
     if (replyPreview && replyPreviewText) { replyPreviewText.textContent = senderName; replyPreview.classList.remove('hidden'); }
     messageInput.focus();
@@ -2892,7 +3023,12 @@ loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = document.getElementById('login-email').value;
     const password = document.getElementById('login-password').value;
-    try { await login(email, password); showChatSection(); await loadChats(); }
+    try { 
+        await login(email, password); 
+        showChatSection(); 
+        await loadChats(); 
+        connectNotificationWebSocket();
+    }
     catch (error) { showError(error.message); }
 });
 
@@ -3033,7 +3169,21 @@ sendMessageBtn.addEventListener('click', async () => {
             messagePayload.encrypted_payload = await window.E2EE.encryptText(currentChatId, content || '', fileMeta);
             messagePayload.content = '';
         }
-        if (replyingToMessage) messagePayload.in_reply_to_id = replyingToMessage.id;
+        if (replyingToMessage) {
+            messagePayload.in_reply_to_id = replyingToMessage.id;
+            // Send decrypted reply_to_content so server can use it for display
+            if (replyingToMessage.encrypted_payload && window.E2EE) {
+                try {
+                    const decryptedReply = await window.E2EE.decryptPayload(currentChatId, replyingToMessage.encrypted_payload);
+                    messagePayload.reply_to_content = decryptedReply || '[Encrypted message]';
+                } catch (e) {
+                    messagePayload.reply_to_content = '[Encrypted message]';
+                }
+            } else {
+                messagePayload.reply_to_content = replyingToMessage.content || '';
+            }
+            messagePayload.reply_to_user_id = replyingToMessage.sender_id;
+        }
         if (fileData) { messagePayload.file_url = fileData.file_url; messagePayload.file_type = fileData.file_type; messagePayload.file_name = fileData.file_name; }
 
         if (websocket && websocket.readyState === WebSocket.OPEN) {
