@@ -3316,12 +3316,19 @@ closeAddMemberModalBtn.addEventListener('click', () => {
 
 async function loadAddMemberFriendsList() {
     try {
+        console.log('[AddMember] Loading friends list...');
         const friends = await getMyFriends();
+        console.log('[AddMember] Friends loaded:', friends.length);
+        
+        console.log('[AddMember] Loading current members for chat:', currentChatId);
         const currentMembers = await getChatMembers(currentChatId);
+        console.log('[AddMember] Current members:', currentMembers.length);
+        
         const currentMemberIds = new Set(currentMembers.map(m => m.user_id));
         
         // Filter out users already in the chat
         const availableFriends = friends.filter(f => !currentMemberIds.has(f.user_id));
+        console.log('[AddMember] Available friends to add:', availableFriends.length);
         
         if (availableFriends.length === 0) {
             addMemberFriendsList.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">No friends available to add</p>';
@@ -3357,8 +3364,8 @@ async function loadAddMemberFriendsList() {
             });
         });
     } catch (error) {
-        console.error('Error loading friends for add member:', error);
-        addMemberFriendsList.innerHTML = '<p style="color: var(--error); text-align: center; padding: 20px;">Failed to load friends</p>';
+        console.error('[AddMember] Error loading friends:', error);
+        addMemberFriendsList.innerHTML = `<p style="color: var(--error); text-align: center; padding: 20px;">Failed to load friends: ${error.message}</p>`;
     }
 }
 
