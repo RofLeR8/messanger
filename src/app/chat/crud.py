@@ -755,6 +755,15 @@ async def chat_has_any_encrypted_keys(db: AsyncSession, chat_id: int) -> bool:
     return count > 0
 
 
+async def get_latest_key_version(db: AsyncSession, chat_id: int) -> int | None:
+    q = (
+        select(func.max(ChatEncryptedKey.key_version))
+        .where(ChatEncryptedKey.chat_id == chat_id)
+        .where(ChatEncryptedKey.key_id != SERVER_BACKUP_KEY_ID)
+    )
+    return (await db.execute(q)).scalar()
+
+
 # ==================== Group Chat Management ====================
 
 async def leave_group_chat(db: AsyncSession, chat_id: int, user_id: int) -> bool:

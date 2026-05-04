@@ -35,6 +35,7 @@ from app.chat.crud import (
     edit_message_encrypted,
     delete_chat_encrypted_keys,
     chat_has_any_encrypted_keys,
+    get_latest_key_version,
 )
 from app.chat.schemas import (
     SMessageCreate,
@@ -352,7 +353,8 @@ async def get_chat_keys_meta(
     current_user_id = user.id
     await _verify_user_in_chat(db, chat_id, current_user_id)
     has_any = await chat_has_any_encrypted_keys(db, chat_id)
-    return {"chat_id": chat_id, "has_any_keys": has_any}
+    latest_version = await get_latest_key_version(db, chat_id)
+    return {"chat_id": chat_id, "has_any_keys": has_any, "latest_version": latest_version}
 
 
 

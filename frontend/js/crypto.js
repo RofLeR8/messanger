@@ -141,9 +141,20 @@
     async function bootstrapChatKeyForMembers(chatId, members, currentUserId, authToken) {
         debugLog('chat_key.bootstrap.start', { chatId, currentUserId, membersCount: members?.length || 0 });
         const pair = await getOrCreateDeviceKeyPair();
+
+        let keyVersion = 1;
+        try {
+            const metaResp = await fetch(`/chats/${chatId}/keys/meta`, { headers: { Authorization: `Bearer ${authToken}` } });
+            if (metaResp.ok) {
+                const meta = await metaResp.json();
+                if (meta?.latest_version) {
+                    keyVersion = meta.latest_version + 1;
+                }
+            }
+        } catch (_) {}
+
         const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
         const exportedKey = await exportAesKey(aesKey);
-        const keyVersion = 1;
 
         let selfKeyStored = false;
         for (const member of members) {
@@ -241,7 +252,24 @@
             } catch (_) {}
 
             if (hasAnyKeys) {
-                debugLog('chat_key.ensure.no_device_key_but_chat_has_keys', { chatId, myKeyId: pair.keyId });
+                debugLog('chat_key.ensure.no_device_key_but_chat_has_keys_trying_recover', { chatId, myKeyId: pair.keyId });
+                try {
+                    const recoverResp = await fetch(`/chats/${chatId}/keys/me/recover`, {
+                        headers: { Authorization: `Bearer ${authToken}` },
+                    });
+                    if (recoverResp.ok) {
+                        const recovered = await recoverResp.json();
+                        const recoveredBase64 = recovered.chat_key_plaintext;
+                        const keyVersion = recovered.key_version || 1;
+                        saveChatKey(chatId, keyVersion, recoveredBase64);
+                        chatKeyCache.set(chatId, { keyVersion, key: recoveredBase64 });
+                        debugLog('chat_key.ensure.recover_success', { chatId, keyVersion, myKeyId: pair.keyId });
+                        await shareChatKeyToUser(chatId, currentUserId, authToken, recoveredBase64, keyVersion, true);
+                        return { keyVersion, key: recoveredBase64 };
+                    }
+                } catch (e) {
+                    debugLog('chat_key.ensure.recover_failed_fallback_bootstrap', { chatId, myKeyId: pair.keyId, error: String(e) });
+                }
                 const wrapped = new Error('CHAT_KEY_MISMATCH');
                 throw wrapped;
             }
