@@ -571,6 +571,11 @@ function getFriendAvatarHtml(user, sizeClass = 'friend-avatar', userId = null) {
     return `<div class="${sizeClass}${clickableClass}" ${clickableAttrs}>${initials}</div>`;
 }
 
+function getInitials(name) {
+    if (!name) return 'U';
+    return name.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+}
+
 async function getUserInfoById(userId) {
     const response = await fetch(`${API_BASE_URL}/users/${userId}`, {
         headers: { 'Authorization': `Bearer ${authToken}` },
