@@ -19,6 +19,12 @@ class User(Base):
     bio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     avatar_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
+    # Email verification
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    verification_token: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    verification_jti: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    verification_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Online status tracking
     is_online: Mapped[bool] = mapped_column(Boolean, default=False)
     last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

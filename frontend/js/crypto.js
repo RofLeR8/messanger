@@ -189,10 +189,11 @@
             throw new Error('Failed to provision encrypted key for current device');
         }
         saveChatKey(chatId, keyVersion, exportedKey);
-        const cached = { keyVersion, key: exportedKey };
-        chatKeyCache.set(chatId, cached);
+        // Сохраняем в правильном формате для loadChatKey
+        const chatMap = { [String(keyVersion)]: exportedKey };
+        chatKeyCache.set(chatId, chatMap);
         debugLog('chat_key.bootstrap.done', { chatId, keyVersion, selfKeyStored, myKeyId: pair.keyId });
-        return cached;
+        return { keyVersion, key: exportedKey };
     }
 
     async function ensureChatKey(chatId, members, currentUserId, authToken) {
@@ -213,11 +214,12 @@
                     fromBase64(myKey.encrypted_chat_key),
                 );
                 const keyBase64 = toBase64(new Uint8Array(decryptedRaw));
-                const cached = { keyVersion: myKey.key_version, key: keyBase64 };
                 saveChatKey(chatId, myKey.key_version, keyBase64);
-                chatKeyCache.set(chatId, cached);
+                // Сохраняем в правильном формате для loadChatKey
+                const chatMap = { [String(myKey.key_version)]: keyBase64 };
+                chatKeyCache.set(chatId, chatMap);
                 debugLog('chat_key.ensure.decrypt_success', { chatId, keyVersion: myKey.key_version, returnedKeyId: myKey?.key_id, myKeyId: pair.keyId });
-                return cached;
+                return { keyVersion: myKey.key_version, key: keyBase64 };
             } catch (error) {
                 debugLog('chat_key.ensure.decrypt_failed', { chatId, myKeyId: pair.keyId, error: String(error?.message || error) });
                 const recoverResp = await fetch(`/chats/${chatId}/keys/me/recover`, {
@@ -229,7 +231,9 @@
                     const recoveredBase64 = recovered.chat_key_plaintext;
                     const keyVersion = recovered.key_version || 1;
                     saveChatKey(chatId, keyVersion, recoveredBase64);
-                    chatKeyCache.set(chatId, { keyVersion, key: recoveredBase64 });
+                    // Сохраняем в правильном формате для loadChatKey
+                    const chatMap = { [String(keyVersion)]: recoveredBase64 };
+                    chatKeyCache.set(chatId, chatMap);
                     try {
                         await shareChatKeyToUser(chatId, currentUserId, authToken, recoveredBase64, keyVersion, true);
                     } catch (_) {}
@@ -254,7 +258,9 @@
                     const recoveredBase64 = recovered.chat_key_plaintext;
                     const keyVersion = recovered.key_version || 1;
                     saveChatKey(chatId, keyVersion, recoveredBase64);
-                    chatKeyCache.set(chatId, { keyVersion, key: recoveredBase64 });
+                    // Сохраняем в правильном формате для loadChatKey
+                    const chatMap = { [String(keyVersion)]: recoveredBase64 };
+                    chatKeyCache.set(chatId, chatMap);
                     // Re-wrap for current device
                     try {
                         await shareChatKeyToUser(chatId, currentUserId, authToken, recoveredBase64, keyVersion, true);

@@ -1,6 +1,5 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timedelta, timezone
 
 from src.app.users.auth import create_access_token, decode_account_key_to_base64
 from src.app.utils.jwt import get_password_hash, verify_password

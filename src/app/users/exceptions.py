@@ -11,6 +11,7 @@ class TokenNotFoundException(HTTPException):
 UserAlreadyExistsException = HTTPException(status_code=status.HTTP_409_CONFLICT, detail="user already exists")
 PasswordMismatchException = HTTPException(status_code=status.HTTP_409_CONFLICT, detail="password not match")
 IncorrectEmailOrPasswordException = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="incorrect email or password")
+UserNotVerifiedException = HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="email not verified. Please check your inbox.")
 NoJwtException = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token")
 NoUserIdException = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user id not found")
 ForbiddenException = HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")

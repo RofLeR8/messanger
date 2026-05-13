@@ -55,7 +55,39 @@
                     <p class="auth-switch">Already have an account? <a href="#" id="show-login">Login</a></p>
                 </form>
 
+                <!-- Email Verification Pending -->
+                <div id="verification-pending" class="auth-form hidden">
+                    <div class="verification-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                            <polyline points="22,6 12,13 2,6"></polyline>
+                        </svg>
+                    </div>
+                    <h2>Check your email</h2>
+                    <p class="verification-text">We've sent a verification link to <strong id="verification-email"></strong>.</p>
+                    <p class="verification-text">Please click the link in the email to activate your account.</p>
+                    <div class="verification-actions">
+                        <button id="resend-verification-btn" class="btn btn-secondary btn-small">Resend email</button>
+                        <button id="back-to-login-btn" class="btn btn-primary">Back to login</button>
+                    </div>
+                    <div id="resend-status" class="verification-text hidden"></div>
+                </div>
+
+                <!-- Email Verified Success -->
+                <div id="verification-success" class="auth-form hidden">
+                    <div class="verification-icon verification-success-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                    </div>
+                    <h2>Email verified!</h2>
+                    <p class="verification-text">Your email has been successfully verified. You can now login.</p>
+                    <button id="go-to-login-btn" class="btn btn-primary">Go to login</button>
+                </div>
+
                 <div id="auth-error" class="error-message hidden"></div>
+                <div id="auth-success" class="success-message hidden"></div>
             </div>
         </div>
 

@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 _env_path = Path(__file__).resolve().parent.parent.parent / ".env.local"
 if not _env_path.exists():
     _env_path = Path(__file__).resolve().parent / ".env"
-load_dotenv(_env_path)
+load_dotenv(_env_path, override=True)
 
 def get_database_url() -> str:
     user = os.getenv("POSTGRES_USER", "ws-test")

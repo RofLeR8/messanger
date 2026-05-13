@@ -68,9 +68,17 @@ const searchUserResults = document.getElementById('search-user-results');
 const loginForm = document.getElementById('login-form');
 const registerForm = document.getElementById('register-form');
 const authError = document.getElementById('auth-error');
+const authSuccess = document.getElementById('auth-success');
 const showRegisterBtn = document.getElementById('show-register');
 const showLoginBtn = document.getElementById('show-login');
 const logoutBtn = document.getElementById('logout-btn');
+const verificationPending = document.getElementById('verification-pending');
+const verificationSuccess = document.getElementById('verification-success');
+const verificationEmail = document.getElementById('verification-email');
+const backToLoginBtn = document.getElementById('back-to-login-btn');
+const goToLoginBtn = document.getElementById('go-to-login-btn');
+const resendVerificationBtn = document.getElementById('resend-verification-btn');
+const resendStatus = document.getElementById('resend-status');
 const chatsList = document.getElementById('chats-list');
 const createDirectChatBtn = document.getElementById('create-direct-chat-btn');
 const createGroupChatBtn = document.getElementById('create-group-chat-btn');
@@ -178,6 +186,13 @@ function showError(message) {
     authError.textContent = message;
     showElement(authError);
     setTimeout(() => hideElement(authError), 5000);
+}
+
+function showSuccessMessage(message) {
+    const authSuccess = document.getElementById('auth-success');
+    authSuccess.textContent = message;
+    showElement(authSuccess);
+    setTimeout(() => hideElement(authSuccess), 8000);
 }
 
 function showModalError(input, message) {
@@ -301,11 +316,14 @@ async function decryptMessageContentIfNeeded(message) {
     if (!payload || !window.E2EE) return message.content || '';
     const chatId = message.chat_id || currentChatId;
     const chatKey = window.E2EE.loadChatKey(chatId);
+    console.log('[Decrypt] Message', message.id, 'chatId:', chatId, 'hasKey:', !!chatKey, 'keyVersion:', chatKey?.keyVersion);
     if (!chatKey) {
+        console.warn('[Decrypt] No key found for chat', chatId);
         return message.file_url ? '' : '[Encrypted message]';
     }
     try {
         const decrypted = await window.E2EE.decryptPayload(chatId, payload);
+        console.log('[Decrypt] Message', message.id, 'decrypted:', decrypted ? 'success' : 'null');
         if (decrypted == null) {
             return message.content || '';
         }
@@ -315,7 +333,169 @@ async function decryptMessageContentIfNeeded(message) {
         }
         return decrypted;
     } catch (error) {
+        console.error('[Decrypt] Message', message.id, 'failed:', error);
         return message.file_url ? '' : '[Encrypted message]';
+    }
+}
+
+async function verifyAndRecoverChatKeys(chatId, messages) {
+    if (!e2eeEnabled || !window.E2EE || !authToken) return true;
+    
+    const encryptedMessages = messages.filter(m => m.ciphertext || m.encrypted_payload);
+    if (encryptedMessages.length === 0) return true;
+    
+    const lastMessage = encryptedMessages[encryptedMessages.length - 1];
+    const payload = getEncryptedPayloadFromMessage(lastMessage);
+    if (!payload) return true;
+    
+    const chatKey = window.E2EE.loadChatKey(chatId);
+    if (!chatKey) {
+        showKeyRecoveryButton(chatId);
+        return false;
+    }
+    
+    try {
+        const decrypted = await window.E2EE.decryptPayload(chatId, payload);
+        if (decrypted !== null) {
+            return true;
+        }
+    } catch (error) {}
+    
+    showKeyRecoveryButton(chatId);
+    return false;
+}
+
+function showKeyRecoveryButton(chatId) {
+    const existingBtn = document.getElementById('key-recovery-btn');
+    if (existingBtn) return;
+    
+    const recoveryDiv = document.createElement('div');
+    recoveryDiv.id = 'key-recovery-container';
+    recoveryDiv.className = 'key-recovery-container';
+    recoveryDiv.innerHTML = `
+        <div class="key-recovery-banner">
+            <div class="key-recovery-text">
+                <span class="key-recovery-icon">🔐</span>
+                <span>Ключи не синхронизированы</span>
+            </div>
+            <button id="key-recovery-btn" class="btn btn-primary btn-sm">Восстановить</button>
+        </div>
+    `;
+    
+    const chatPage = document.getElementById('chat-page');
+    const searchBar = chatPage?.querySelector('#search-bar');
+    if (chatPage && searchBar) {
+        // Вставляем баннер перед search-bar
+        searchBar.insertAdjacentElement('beforebegin', recoveryDiv);
+    } else if (chatPage) {
+        const pageHeader = chatPage.querySelector('.page-header');
+        if (pageHeader) {
+            pageHeader.insertAdjacentElement('afterend', recoveryDiv);
+        } else {
+            chatPage.insertBefore(recoveryDiv, chatPage.firstChild);
+        }
+    }
+    
+    document.getElementById('key-recovery-btn').addEventListener('click', async () => {
+        await performKeyRecovery(chatId);
+    });
+}
+
+function hideKeyRecoveryButton() {
+    const container = document.getElementById('key-recovery-container');
+    if (container) container.remove();
+}
+
+async function performKeyRecovery(chatId) {
+    const btn = document.getElementById('key-recovery-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Восстановление...';
+    }
+    
+    console.log('[KeyRecovery] Starting recovery for chat:', chatId);
+    
+    try {
+        if (window.E2EE) {
+            console.log('[KeyRecovery] Clearing all keys and caches');
+            // Очистка всех ключей и кешей
+            localStorage.removeItem('e2ee-device-keypair-v1');
+            localStorage.removeItem('e2ee-device-keyid-v1');
+            localStorage.removeItem('e2ee-chat-keys-v1');
+            
+            // Очистка кеша ключей в памяти для текущего чата
+            window.E2EE.clearChatKey(chatId);
+            console.log('[KeyRecovery] Keys cleared');
+            
+            console.log('[KeyRecovery] Generating new device keypair');
+            await window.E2EE.getOrCreateDeviceKeyPair();
+            console.log('[KeyRecovery] Uploading public key');
+            await window.E2EE.uploadMyPublicKey(authToken);
+            console.log('[KeyRecovery] Public key uploaded');
+        }
+        
+        e2eeRecoveryRequestedChats.delete(chatId);
+        
+        console.log('[KeyRecovery] Getting chat members');
+        const members = await getChatMembers(chatId);
+        console.log('[KeyRecovery] Members count:', members?.length);
+        
+        console.log('[KeyRecovery] Preparing chat key');
+        const keyReady = await prepareChatKeyIfNeeded(chatId);
+        console.log('[KeyRecovery] Key ready:', keyReady);
+        
+        if (keyReady) {
+            console.log('[KeyRecovery] Hiding recovery button');
+            hideKeyRecoveryButton();
+            
+            console.log('[KeyRecovery] Reloading messages');
+            // Полная перезагрузка сообщений с новыми ключами, пропускаем проверку
+            await loadMessages(chatId, true);
+            console.log('[KeyRecovery] Messages reloaded');
+            
+            console.log('[KeyRecovery] Reconnecting WebSocket');
+            connectWebSocket(chatId);
+            
+            // Обновляем превью последнего сообщения в списке чатов
+            console.log('[KeyRecovery] Updating chat preview');
+            try {
+                const chats = await getChats();
+                const currentChat = chats.find(c => c.id === chatId);
+                if (currentChat) {
+                    console.log('[KeyRecovery] Found chat, decorating preview');
+                    // Пропускаем подготовку ключа, так как он уже восстановлен
+                    await decorateChatListPreviews([currentChat], true);
+                    console.log('[KeyRecovery] Preview decorated, updating DOM');
+                    const chatItem = document.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
+                    if (chatItem) {
+                        const previewEl = chatItem.querySelector('.chat-item-last-message');
+                        if (previewEl) {
+                            const newPreview = formatChatListPreviewLine(currentChat);
+                            console.log('[KeyRecovery] Setting preview text:', newPreview);
+                            previewEl.textContent = newPreview;
+                        } else {
+                            console.warn('[KeyRecovery] Preview element not found');
+                        }
+                    } else {
+                        console.warn('[KeyRecovery] Chat item not found in DOM');
+                    }
+                } else {
+                    console.warn('[KeyRecovery] Current chat not found in list');
+                }
+            } catch (error) {
+                console.warn('[KeyRecovery] Failed to update chat preview:', error);
+            }
+            
+            console.log('[KeyRecovery] Recovery complete');
+        } else {
+            console.warn('[KeyRecovery] Key not ready after recovery');
+        }
+    } catch (error) {
+        console.error('[KeyRecovery] Recovery failed:', error);
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Повторить';
+        }
     }
 }
 
@@ -334,7 +514,7 @@ function formatChatListPreviewLine(chat) {
     return inner;
 }
 
-async function decorateChatListPreviews(chats) {
+async function decorateChatListPreviews(chats, skipKeyPrep = false) {
     for (const chat of chats) {
         chat._preview_inner = null;
         chat._preview_file_label = undefined;
@@ -351,8 +531,13 @@ async function decorateChatListPreviews(chats) {
             chat._preview_inner = raw === '[Encrypted message]' ? '' : raw;
             continue;
         }
-        await prepareChatKeyIfNeeded(chat.id);
+        
+        if (!skipKeyPrep) {
+            await prepareChatKeyIfNeeded(chat.id);
+        }
+        
         if (!window.E2EE.loadChatKey(chat.id)) {
+            console.log('[DecoratePreview] No key found for chat', chat.id);
             chat._preview_inner = '';
             continue;
         }
@@ -370,7 +555,9 @@ async function decorateChatListPreviews(chats) {
                 if (aad?.file_nonce) inner = '';
             }
             chat._preview_inner = inner || '';
-        } catch (_) {
+            console.log('[DecoratePreview] Chat', chat.id, 'preview:', inner);
+        } catch (error) {
+            console.warn('[DecoratePreview] Failed to decrypt preview for chat', chat.id, error);
             chat._preview_inner = '';
         }
     }
@@ -664,6 +851,7 @@ function navigateToChats() {
     // Disconnect chat WebSocket
     if (websocket) { websocket.close(); websocket = null; }
     hideElement(groupMembersPanel);
+    hideKeyRecoveryButton();
 
     // Reset chat detail page
     chatPage.classList.remove('active');
@@ -733,6 +921,7 @@ async function navigateToChat(chatId, chatName, isGroup) {
     chatTitle.textContent = chatName;
     chatNamesCache[chatId] = chatName; // Cache the name
     currentChatMembers = [];
+    hideKeyRecoveryButton();
 
     // Update header status
     if (isGroup) {
@@ -1111,15 +1300,14 @@ async function searchUserAndRender() {
 
 // ==================== Auth Functions ====================
 async function login(email, password) {
-    // Get device info for session
     const deviceName = navigator.userAgent.includes('Mobile') ? 'Mobile Device' : 'Desktop';
     const deviceInfo = navigator.userAgent;
-    
+
     const response = await fetch(`${API_BASE_URL}/auth/login/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            email, 
+        body: JSON.stringify({
+            email,
             password,
             device_name: deviceName,
             device_info: deviceInfo,
@@ -1127,8 +1315,17 @@ async function login(email, password) {
         credentials: 'include',
     });
     const data = await response.json();
+
+    if (response.ok && data.unverified) {
+        verificationEmail.textContent = data.email;
+        hideElement(loginForm);
+        showElement(verificationPending);
+        resendVerificationBtn.click();
+        return { unverified: true };
+    }
+
     if (!response.ok) throw new Error(data.detail || 'Login failed');
-    
+
     authToken = data.access_token;
     currentSessionId = data.session_id ?? null;
     localStorage.setItem('authToken', authToken);
@@ -1145,17 +1342,16 @@ async function login(email, password) {
 }
 
 async function register(email, name, username, password, passwordCheck) {
-    // Generate account encryption key on client side for first registration
     const accountKey = await generateAccountKey();
-    
+
     const response = await fetch(`${API_BASE_URL}/auth/register/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            email, 
-            name, 
-            username: username || null, 
-            password, 
+        body: JSON.stringify({
+            email,
+            name,
+            username: username || null,
+            password,
             password_check: passwordCheck,
             account_key_cipher: accountKey.cipher,
             account_key_nonce: accountKey.nonce,
@@ -1164,7 +1360,31 @@ async function register(email, name, username, password, passwordCheck) {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Registration failed');
-    return true;
+    return data;
+}
+
+async function verifyEmail(token) {
+    const response = await fetch(`${API_BASE_URL}/auth/verify-email/?token=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Verification failed');
+    return data;
+}
+
+async function resendVerificationEmail(email) {
+    const response = await fetch(`${API_BASE_URL}/auth/resend-verification/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+        const error = data.detail || 'Failed to resend verification email';
+        throw new Error(error);
+    }
+    return data;
 }
 
 /**
@@ -1172,6 +1392,10 @@ async function register(email, name, username, password, passwordCheck) {
  * Creates a random 256-bit key and encrypts it with password-derived key.
  */
 async function generateAccountKey() {
+    if (!window.crypto || !window.crypto.subtle) {
+        throw new Error('Web Crypto API is not available. Please use a modern browser.');
+    }
+
     // Generate random 256-bit account key
     const accountKeyBytes = crypto.getRandomValues(new Uint8Array(32));
     
@@ -2074,9 +2298,11 @@ function clearChatUnreadCount(chatId) {
 }
 
 // ==================== Messages Rendering ====================
-async function loadMessages(chatId) {
+async function loadMessages(chatId, skipKeyVerification = false) {
     // Reset infinite scroll state
     resetInfiniteScroll();
+    
+    window._cachedMessages = {};
 
     try {
         const messages = await getMessages(chatId);
@@ -2109,10 +2335,22 @@ async function loadMessages(chatId) {
             const el = createMessageElement(msg, isSent);
             fragment.appendChild(el);
             void hydrateEncryptedImagePreviews(el, msg);
+            
+            window._cachedMessages[msg.id] = msg;
         }
         messagesContainer.appendChild(fragment);
         scrollToBottom();
         initInfiniteScroll();
+        
+        if (!skipKeyVerification) {
+            setTimeout(() => {
+                verifyAndRecoverChatKeys(chatId, messages).then(needsRecovery => {
+                    if (needsRecovery === false) {
+                        console.log('[E2EE] Key mismatch detected, recovery available');
+                    }
+                });
+            }, 500);
+        }
     } catch (error) {
         console.error('Error loading messages:', error);
         renderMessagesLoadError(chatId);
@@ -3105,16 +3343,55 @@ async function handleGroupPhotoUpload(file, onUploaded) {
 
 // ==================== Event Listeners ====================
 showRegisterBtn.addEventListener('click', (e) => { e.preventDefault(); hideElement(loginForm); showElement(registerForm); });
-showLoginBtn.addEventListener('click', (e) => { e.preventDefault(); hideElement(registerForm); showElement(loginForm); });
+showLoginBtn.addEventListener('click', (e) => { e.preventDefault(); hideElement(registerForm); hideElement(verificationPending); hideElement(verificationSuccess); showElement(loginForm); });
+
+backToLoginBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    hideElement(verificationPending);
+    hideElement(verificationSuccess);
+    showElement(loginForm);
+    registerForm.reset();
+});
+
+goToLoginBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    hideElement(verificationSuccess);
+    hideElement(verificationPending);
+    hideElement(registerForm);
+    showElement(loginForm);
+});
+
+resendVerificationBtn?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const email = verificationEmail.textContent;
+    resendVerificationBtn.disabled = true;
+    resendStatus.textContent = 'Sending...';
+    resendStatus.className = 'verification-text';
+    showElement(resendStatus);
+    try {
+        await resendVerificationEmail(email);
+        resendStatus.textContent = 'Verification email sent!';
+        resendStatus.className = 'verification-text success';
+        setTimeout(() => {
+            resendVerificationBtn.disabled = false;
+            hideElement(resendStatus);
+        }, 3000);
+    } catch (error) {
+        resendStatus.textContent = error.message;
+        resendStatus.className = 'verification-text error';
+        resendVerificationBtn.disabled = false;
+    }
+});
 
 loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = document.getElementById('login-email').value;
     const password = document.getElementById('login-password').value;
-    try { 
-        await login(email, password); 
-        showChatSection(); 
-        await loadChats(); 
+    try {
+        const result = await login(email, password);
+        if (result?.unverified) return;
+        showChatSection();
+        await loadChats();
         connectNotificationWebSocket();
     }
     catch (error) { showError(error.message); }
@@ -3129,8 +3406,9 @@ registerForm.addEventListener('submit', async (e) => {
     const passwordCheck = document.getElementById('register-password-check').value;
     try {
         await register(email, name, username, password, passwordCheck);
-        hideElement(registerForm); showElement(loginForm);
-        document.getElementById('login-email').value = email;
+        hideElement(registerForm);
+        verificationEmail.textContent = email;
+        showElement(verificationPending);
     } catch (error) { showError(error.message); }
 });
 
@@ -3365,8 +3643,34 @@ async function loadAddMemberFriendsList() {
                     alert('Failed to add member: ' + error.message);
                     btn.disabled = false;
                     btn.textContent = 'Add';
-                }
+}
+});
+
+// Check for email verification token in URL
+(async function checkEmailVerification() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+
+    if (token) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/auth/verify-email/?token=${encodeURIComponent(token)}`, {
+                method: 'POST',
             });
+            const data = await response.json();
+
+            if (response.ok) {
+                showSuccessMessage('Email verified successfully! You can now login.');
+            } else {
+                showError(data.detail || 'Verification failed');
+            }
+        } catch (error) {
+            showError('Verification failed. Please try again.');
+        }
+
+        // Clean URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+})();
         });
     } catch (error) {
         console.error('[AddMember] Error loading friends:', error);
@@ -3623,6 +3927,23 @@ if (avatarUploadInput) {
 // ==================== Logout update ====================
 window.addEventListener('DOMContentLoaded', async () => {
     initUiScaleSettings();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const verifyToken = urlParams.get('token');
+    if (verifyToken) {
+        try {
+            await verifyEmail(verifyToken);
+            hideElement(loginForm);
+            hideElement(registerForm);
+            hideElement(verificationPending);
+            showElement(verificationSuccess);
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } catch (error) {
+            showError(error.message);
+            showElement(loginForm);
+        }
+    }
+
     const savedToken = localStorage.getItem('authToken');
     const savedSessionId = localStorage.getItem('currentSessionId');
     if (savedSessionId) currentSessionId = Number(savedSessionId);

@@ -10,10 +10,13 @@ class SUserRegister(BaseModel):
     password_check: str = Field(..., max_length=30, min_length=5)
     name: str = Field(..., max_length=30)
     username: Optional[str] = Field(None, max_length=30)
-    # Account encryption key for multi-device sync (encrypted with password-derived key)
     account_key_cipher: Optional[str] = Field(None, description="Base64-encoded encrypted account key")
     account_key_nonce: Optional[str] = Field(None, description="Nonce for account key encryption")
     account_key_salt: Optional[str] = Field(None, description="Salt for password derivation")
+
+
+class SResendVerification(BaseModel):
+    email: EmailStr
 
 
 class SUserAuth(BaseModel):

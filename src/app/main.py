@@ -42,6 +42,7 @@ class EarlySecurityMiddleware(BaseHTTPMiddleware):
         "/js",
         "/docs",
         "/redoc",
+        "/verify-email",
     )
     _allowed_exact = {"/", "/openapi.json", "/favicon.ico"}
     _blocked_scanner_paths = {
@@ -124,6 +125,10 @@ app.mount('/uploads/files', StaticFiles(directory=uploads_dir, html=True), name=
 
 @app.get("/")
 async def root():
+    return FileResponse(os.path.join(frontend_dir, "index.html"))
+
+@app.get("/verify-email")
+async def verify_email():
     return FileResponse(os.path.join(frontend_dir, "index.html"))
 
 app.add_middleware(

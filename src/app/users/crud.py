@@ -30,7 +30,51 @@ async def get_one_by_username_or_none(db: AsyncSession, username: str) -> Option
     result = await db.execute(q)
     return result.scalars().first()
 
-async def create_user(db: AsyncSession, user: SUserRegister) -> User:
+
+async def get_one_by_verification_token(db: AsyncSession, token: str) -> Optional[User]:
+    q = select(User).filter(User.verification_token == token)
+    result = await db.execute(q)
+    return result.scalars().first()
+
+
+async def verify_user_email(db: AsyncSession, user: User) -> User:
+    user.is_verified = True
+    user.verification_token = None
+    user.verification_jti = None
+    try:
+        await db.commit()
+        await db.refresh(user)
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise e
+    return user
+
+
+async def update_verification_token(
+    db: AsyncSession,
+    user: User,
+    verification_token: str,
+    verification_jti: str,
+) -> User:
+    user.verification_token = verification_token
+    user.verification_jti = verification_jti
+    user.verification_sent_at = datetime.utcnow()
+    try:
+        await db.commit()
+        await db.refresh(user)
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise e
+    return user
+
+
+async def get_one_by_verification_jti(db: AsyncSession, jti: str) -> Optional[User]:
+    q = select(User).filter(User.verification_jti == jti)
+    result = await db.execute(q)
+    return result.scalars().first()
+
+
+async def create_user(db: AsyncSession, user: SUserRegister, verification_token: str, verification_jti: str) -> User:
     hashed_password = get_password_hash(user.password)
     
     # Generate account encryption key if not provided
@@ -60,7 +104,10 @@ async def create_user(db: AsyncSession, user: SUserRegister) -> User:
         hashed_password=hashed_password,
         username=user.username,
         is_online=False,
-        # Store account encryption key if provided (for multi-device sync)
+        is_verified=False,
+        verification_token=verification_token,
+        verification_jti=verification_jti,
+        verification_sent_at=datetime.utcnow(),
         account_key_cipher=account_key_cipher,
         account_key_nonce=account_key_nonce,
         account_key_salt=account_key_salt,

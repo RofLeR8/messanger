@@ -18,6 +18,21 @@ class Settings(BaseSettings):
     COOKIE_SECURE: bool = False
     COOKIE_SAMESITE: str = "lax"
     COOKIE_DOMAIN: str | None = None
+
+    REGISTER_RATE_LIMIT: int = 5
+    REGISTER_RATE_WINDOW: int = 60
+    VERIFY_RATE_LIMIT: int = 10
+    VERIFY_RATE_WINDOW: int = 60
+    RESEND_RATE_LIMIT: int = 3
+    RESEND_RATE_WINDOW: int = 300
+
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_NAME: str = "Roflochatik"
+    FRONTEND_URL: str = "http://localhost:8000"
+
     model_config = SettingsConfigDict(
         env_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"),
         extra="allow"
